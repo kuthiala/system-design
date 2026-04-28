@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>System Design Decision Tree — Enhanced</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <div id="sidebar">
+      <div id="sb-top">
+        <h1>System Design</h1>
+        <p>Decision tree — all scales</p>
+      </div>
+      <input type="text" id="search" placeholder="🔍  Search nodes...">
+      <div id="phase-nav"></div>
+
+      <div id="example-section">
+        <div id="example-section-hdr">📦 Example Overlay</div>
+        <select id="example-select">
+          <option value="">— None —</option>
+        </select>
+        <label id="example-upload-btn" title="Upload a custom example .js file">
+          + Upload example
+          <input type="file" id="example-upload" accept=".js" style="display:none">
+        </label>
+        <div id="example-upload-error"></div>
+        <div id="example-overview"></div>
+      </div>
+
+      <div id="legend">
+        <div class="leg"><div class="leg-d" style="background:#3b82f6"></div>Small <1K RPS / <1M users</div>
+        <div class="leg"><div class="leg-d" style="background:#10b981"></div>Medium <50K RPS / <50M users</div>
+        <div class="leg"><div class="leg-d" style="background:#f59e0b"></div>Large <500K RPS / <500M users</div>
+        <div class="leg"><div class="leg-d" style="background:#ef4444"></div>Hyper >500K RPS / >500M users</div>
+      </div>
+    </div>
+    <button id="sidebar-toggle" aria-label="Toggle sidebar" title="Toggle sidebar"></button>
+
+    <div id="canvas-wrap">
+      <svg id="svg">
+        <defs>
+          <marker id="arr" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="5" markerHeight="5" orient="auto">
+            <path d="M1 1L6 4L1 7" fill="none" stroke="#2d3f5a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </marker>
+        </defs>
+      </svg>
+      <div id="breadcrumb"></div>
+      <div id="ctrls">
+        <button class="cb" id="zi" title="Zoom in">+</button>
+        <button class="cb" id="zo" title="Zoom out">−</button>
+        <button class="cb" id="fit" title="Reset view">↺</button>
+        <button class="cb" id="rst" title="Expand all"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="2" y1="8" x2="5" y2="8"/><line x1="5" y1="3" x2="5" y2="13"/><line x1="5" y1="3" x2="14" y2="3"/><line x1="5" y1="8" x2="14" y2="8"/><line x1="5" y1="13" x2="14" y2="13"/></svg></button>
+      </div>
+      <div id="hint">Scroll to zoom · Drag to pan · Click node to expand · Click label for detail</div>
+    </div>
+
+    <div id="dp">
+      <div id="dp-resize"></div>
+      <div id="dp-hdr">
+        <div id="dp-icon"></div>
+        <div id="dp-title">Select a node</div>
+        <div id="dp-phase"></div>
+        <button id="dp-expand" title="Expand panel">⇔</button>
+        <button id="dp-close">×</button>
+      </div>
+      <div id="dp-body">
+        <p style="color:#334155;font-size:12px;padding-top:8px">Click any node in the tree to see detailed recommendations, tradeoffs, and level-up numbers for every company scale.</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+  <script src="data/phase-01-requirements.js"></script>
+  <script src="data/phase-02-architecture.js"></script>
+  <script src="data/phase-03-api.js"></script>
+  <script src="data/phase-04-database.js"></script>
+  <script src="data/phase-05-sharding.js"></script>
+  <script src="data/phase-06-compute.js"></script>
+  <script src="data/phase-07-messaging.js"></script>
+  <script src="data/phase-08-storage.js"></script>
+  <script src="data/phase-09-reliability.js"></script>
+  <script src="data/phase-10-networking.js"></script>
+  <script src="data/phase-11-observability.js"></script>
+  <script src="data/phase-12-security.js"></script>
+  <script src="data/phase-13-operations.js"></script>
+  <script src="data/phase-14-analytics.js"></script>
+  <script src="data/phase-15-cost.js"></script>
+  <script src="data/phase-16-ml.js"></script>
+  <script src="data/phase-17-multitenancy.js"></script>
+  <script src="data/phase-18-realtime.js"></script>
+  <script src="data/phase-19-compliance.js"></script>
+  <script src="data/phase-20-testing.js"></script>
+  <script src="data/phase-21-migrations.js"></script>
+
+  <!-- Example plugins (modular — add new examples here) -->
+  <script src="examples/_registry.js"></script>
+
+  <script src="app.js"></script>
+</body>
+</html>
