@@ -2,7 +2,7 @@
 // CONSTANTS
 // ══════════════════════════════════════════════════════════════
 
-const NODE_W = 280, NODE_H = 60, H_GAP = 300, V_GAP = 60;
+const NODE_W = 238, NODE_H = 98, H_GAP = 300, V_GAP = 60;
 const MIN_NODE_GAP = NODE_H + 16;
 
 const PHASE_COLORS = {
@@ -258,7 +258,8 @@ function render() {
   enter.append("rect").attr("width", NODE_W).attr("height", NODE_H).attr("rx", 7).attr("stroke-width", 1);
   enter.append("text").attr("class", "nd-icon").attr("x", 12).attr("y", 22).style("font-size", "13px").style("font-family", "sans-serif");
   enter.append("text").attr("class", "nd-name").attr("x", 32).attr("y", 20).style("font-size", "11px").style("font-weight", "600").style("fill", "#e2e8f0");
-  enter.append("text").attr("class", "nd-short").attr("x", 32).attr("y", 36).style("font-size", "9px").style("fill", "#64748b");
+  enter.append("line").attr("class", "nd-sep-main").attr("x1", 12).attr("x2", NODE_W - 12).attr("y1", 28).attr("y2", 28).style("stroke", "#334155").style("stroke-width", 0.5);
+  enter.append("g").attr("class", "nd-axes");
   enter.append("text").attr("class", "nd-expand-btn").attr("x", NODE_W - 14).attr("y", NODE_H / 2 + 5).style("font-size", "11px").style("fill", "#475569").style("cursor", "pointer").style("user-select", "none");
 
   const all = enter.merge(nodeGs);
@@ -276,7 +277,52 @@ function render() {
 
   all.select(".nd-icon").text(d => d.icon || "•");
   all.select(".nd-name").text(d => d.name);
-  all.select(".nd-short").text(_ => "");
+
+  all.select(".nd-axes").each(function(d) {
+    d3.select(this).selectAll("*").remove();
+    if (!d.tradeoffs?.length) return;
+
+    let lineIdx = 0;
+    d.tradeoffs.slice(0, 3).forEach((axis, axisIdx) => {
+      const left = axis.left.split(":")[0];
+      const right = axis.right.split(":")[0];
+      const y = 36 + (lineIdx * 10);
+
+      d3.select(this)
+        .append("text")
+        .attr("x", 32)
+        .attr("y", y)
+        .style("font-size", "7px")
+        .style("fill", "#cbd5e1")
+        .style("pointer-events", "none")
+        .text(left + " vs");
+
+      lineIdx += 1;
+      const y2 = 36 + (lineIdx * 10);
+      d3.select(this)
+        .append("text")
+        .attr("x", 32)
+        .attr("y", y2)
+        .style("font-size", "7px")
+        .style("fill", "#cbd5e1")
+        .style("pointer-events", "none")
+        .text(right);
+
+      lineIdx += 1;
+
+      if (axisIdx < d.tradeoffs.slice(0, 3).length - 1) {
+        const sepY = 36 + (lineIdx * 10) - 5;
+        d3.select(this)
+          .append("line")
+          .attr("x1", 12)
+          .attr("x2", NODE_W - 12)
+          .attr("y1", sepY)
+          .attr("y2", sepY)
+          .style("stroke", "#1e293b")
+          .style("stroke-width", 0.4);
+      }
+    });
+  });
 
   all.select(".nd-expand-btn")
     .text(d => (d.children?.length) ? (d._collapsed ? "▸" : "▾") : "")
