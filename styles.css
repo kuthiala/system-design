@@ -1,6 +1,7 @@
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%;overflow:hidden;background:#080b14;font-family:'Segoe UI',system-ui,sans-serif;color:#e2e8f0}
-#app{display:flex;height:100vh;width:100vw;position:relative}
+/* Use dvh (dynamic viewport height) so mobile browser chrome doesn't clip content */
+#app{display:flex;height:100vh;height:100dvh;width:100vw;position:relative}
 
 /* SIDEBAR */
 #sidebar {
@@ -223,3 +224,15 @@ html,body{height:100%;overflow:hidden;background:#080b14;font-family:'Segoe UI',
 .ds.ex-overlay-empty{background:#0d1117;border:1px dashed #2d3f5a;border-radius:8px;padding:10px;margin:8px 0}
 .ds.ex-overlay-empty h3{color:#475569!important;font-size:11px}
 .ds.ex-overlay-empty code{background:#1e2433;padding:1px 4px;border-radius:3px;font-size:10px;color:#a78bfa}
+
+/* Mobile: push controls above browser chrome / safe area */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  #ctrls{bottom:calc(42px + env(safe-area-inset-bottom))}
+  #hint{bottom:calc(16px + env(safe-area-inset-bottom))}
+  #dp-body{padding-bottom:calc(14px + env(safe-area-inset-bottom))}
+}
+@media (max-width: 600px) {
+  /* On narrow screens the panel takes full width */
+  #dp{min-width:0;width:100vw!important}
+  /* Sidebar auto-collapses on very small screens (JS also handles this via localStorage) */
+}
