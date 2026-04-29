@@ -5,7 +5,10 @@ const PHASE_MIGRATIONS = {
   detail:{what:"The patterns and processes for evolving your live system without downtime: schema changes, datastore swaps, service extractions, large-scale backfills.",
     why:"Every successful system needs to evolve. The migration capability is the limiting factor on architectural improvements. Without it, you're stuck with day-1 decisions forever.",
     numbers:"Online schema migrations (gh-ost, pt-osc): minutes to hours for billion-row tables, near-zero lock time. Datastore migrations: 6–18 month projects for >100GB."},
-  tradeoffs:[{axis:"Speed vs Safety",left:"Big bang: fast, risky",right:"Expand-contract: slow, safe",pos:0.7},{axis:"Code complexity vs Risk",left:"Dual-write: complex, safe",right:"Hard cutover: simple, risky",pos:0.5}],
+  tradeoffs:[
+    {axis:"Migration strategy",left:"Big-bang cutover: one weekend, simple plan, full rollback if it fails",right:"Expand-contract over weeks: zero-downtime, dual-state code in flight"},
+    {axis:"Schema change pattern",left:"Dual-write to old + new: safe rollback, complex code, drift if unmonitored",right:"Hard cutover at flag flip: minimal code, can't roll back data once new schema is written"}
+  ],
   levelUp:[
     {from:"small",to:"medium",trigger:"First migration that needs >5min downtime",action:"Adopt expand-contract pattern. Online migration tool. Backfill jobs idempotent."},
     {from:"medium",to:"large",trigger:"First datastore swap or >1B row table",action:"Dual-write infra. Shadow read for verification. Gradual traffic shift with metrics."},
@@ -17,7 +20,9 @@ const PHASE_MIGRATIONS = {
      detail:{what:"Pattern for changing database schema without breaking running code or requiring downtime.",
        why:"App and DB deploy at different times. A schema change that requires synchronized deploy is a recipe for outages.",
        numbers:"Expand-contract phases: 1) Add new (additive only), 2) Dual-write old+new, 3) Backfill, 4) Switch reads to new, 5) Stop writing old, 6) Drop old. Each phase deployable independently."},
-     tradeoffs:[{axis:"Phases vs Speed",left:"6 deploys: safe",right:"1 deploy: risky",pos:0.4}],
+     tradeoffs:[
+       {axis:"Rollout granularity",left:"6 sequential deploys (add, dual-write, backfill, switch reads, switch writes, drop): safe at every step",right:"Single deploy with full change: fast if it works, painful rollback when it doesn't"}
+     ],
      sizes_cfg:{
        small:{range:"Direct migrations OK at low traffic",rec:"Use ORM migrations (Rails/Django/Prisma). Avoid renames (drop+add). Always additive in same release.",tools:["Rails migrations","Alembic","Flyway","Prisma Migrate"]},
        medium:{range:"Online tools for large tables",rec:"Use gh-ost (MySQL) or pg_repack/pg_squeeze (Postgres) for tables >10M rows. Always expand-contract for column drops.",tools:["gh-ost","pt-online-schema-change","pg_repack","Square's shift"]},
@@ -41,7 +46,9 @@ const PHASE_MIGRATIONS = {
      detail:{what:"Moving from one datastore to another (e.g., MySQL → Cassandra, Postgres → Spanner) without downtime or data loss.",
        why:"This is the highest-stakes type of migration. Get it wrong and you lose data; do it slowly and you're stuck running two systems indefinitely.",
        numbers:"Standard playbook (Stripe-style): backfill → dual-write → dual-read with comparison → cutover → cleanup. 6–18 months for large tables."},
-     tradeoffs:[{axis:"Cutover speed vs Verification",left:"Fast: less verified",right:"Slow: comprehensive checks",pos:0.5}],
+     tradeoffs:[
+       {axis:"Cutover pacing",left:"Fast switch (minutes): low ops cost, less time to spot anomalies before commit",right:"Gradual switch over hours/days with verification queries: comprehensive checks, longer dual-write window"}
+     ],
      sizes_cfg:{
        medium:{range:"Dual-write with manual cutover",rec:"App writes to both old and new. Backfill historical data. Compare reads (sample). Manual cutover after weeks of stability.",tools:["Custom dual-write","Debezium CDC","AWS DMS"]},
        large:{range:"Automated migration framework",rec:"Framework: dual-write + shadow-read + diff metrics + per-tenant cutover. Rollback at any point. Used for many migrations across the org.",tools:["Stripe-style migration framework","custom CDC pipeline","Debezium + Kafka"]},
@@ -60,7 +67,9 @@ const PHASE_MIGRATIONS = {
      detail:{what:"A pattern for migrating from a legacy system: route specific traffic patterns to a new system, gradually 'strangling' the old until it can be removed.",
        why:"Big-bang rewrites fail (Netscape, Twitter rewrites). Strangler fig reduces risk by validating each piece in production before the next.",
        numbers:"Successful strangler migrations: 6 months to 3 years. Big-bang rewrites: 50%+ failure rate, often abandoned."},
-     tradeoffs:[{axis:"Speed vs Risk",left:"Big bang: fast, often fails",right:"Strangler: slow, succeeds",pos:0.7}],
+     tradeoffs:[
+       {axis:"Service rewrite pattern",left:"Big-bang rewrite: faster on paper, frequently fails on hidden integration assumptions",right:"Strangler fig (route features gradually, slowly replace): months of dual systems, much higher success rate"}
+     ],
      sizes_cfg:{
        medium:{range:"Reverse proxy routes by path",rec:"Put gateway in front of monolith. New endpoints route to new service. Old paths still go to monolith. Migrate one endpoint at a time.",tools:["Nginx","Envoy","API gateway routing rules"]},
        large:{range:"Per-feature flags + parallel implementation",rec:"Feature flag controls routing. Run old + new in parallel for verification. Migrate by user cohort first, then by % of traffic.",tools:["LaunchDarkly","Envoy traffic split","Istio canary"]},

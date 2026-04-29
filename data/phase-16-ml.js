@@ -5,7 +5,11 @@ const PHASE_ML = {
   detail:{what:"Architecture for machine learning inference (real-time predictions), batch scoring, embedding/vector retrieval, and model training pipelines. Increasingly co-equal with the transactional stack.",
     why:"ML workloads have radically different cost, latency, and scaling characteristics than CRUD. A GPU is 50–500× more expensive per hour than a CPU. Throwing ML on regular infra wastes money or breaks SLOs.",
     numbers:"GPU inference: A100 ~$2–4/hr cloud, T4 ~$0.35/hr. LLM token cost: GPT-4 ~$30/1M input tokens, open-source ~$0.20/1M (self-hosted). Embedding cost: ~$0.02/1M tokens. Vector search: 10–50ms p99 at 100M vectors."},
-  tradeoffs:[{axis:"Latency vs Cost",left:"Realtime GPU: $$$",right:"Batch CPU: $",pos:0.5},{axis:"Hosted API vs Self-host",left:"OpenAI/Anthropic: simple",right:"vLLM/TGI: control + cheap at scale",pos:0.5},{axis:"Accuracy vs Speed",left:"Big model: slow, accurate",right:"Distilled/quantized: fast",pos:0.5}],
+  tradeoffs:[
+    {axis:"Inference timing",left:"Realtime GPU inference: <500ms, $$$ per inference",right:"Batch CPU overnight: hours of latency, cents per inference"},
+    {axis:"Hosting model",left:"Hosted API (OpenAI, Anthropic, Bedrock): zero ops, per-token billing, vendor-dependent",right:"Self-hosted (vLLM, TGI - High-throughput LLM serving): own GPUs, much cheaper past 100K tokens/day"},
+    {axis:"Model quality vs speed",left:"Frontier model (e.g., GPT-4 class): highest accuracy, 2–10s p99, $$$/M tokens",right:"Distilled / quantized small model: 10× faster, 5–20% accuracy hit"}
+  ],
   levelUp:[
     {from:"small",to:"medium",trigger:"LLM API spend >$2K/mo or latency-sensitive use case",action:"Add prompt caching, response caching (semantic). Move embeddings to dedicated vector DB. Batch where possible."},
     {from:"medium",to:"large",trigger:"LLM spend >$50K/mo or RAG corpus >10M docs",action:"Self-host open-source models (vLLM/TGI). Dedicated GPU pool. Vector DB cluster (Qdrant/Pinecone). Model gateway with fallback chain."},
@@ -17,7 +21,9 @@ const PHASE_ML = {
      detail:{what:"The infrastructure that takes a trained model and serves predictions at production latency and reliability.",
        why:"Model serving has unique problems: cold start (loading multi-GB weights), batching (GPUs are wasted at batch size 1), tail latency from variable token counts, and request shape diversity.",
        numbers:"Triton/vLLM: 5–20× higher GPU utilization than naive Flask. Continuous batching: 3–10× throughput vs static batching. KV cache: 50%+ of GPU memory for LLMs."},
-     tradeoffs:[{axis:"Throughput vs p99 latency",left:"Big batches: high TPS",right:"Small batches: low latency",pos:0.5}],
+     tradeoffs:[
+       {axis:"Inference batching",left:"Large batches (32–128 requests): 10× throughput per GPU, p99 grows with batch size",right:"Small or no batching: lowest p99 per request, GPU underutilized at low load"}
+     ],
      sizes_cfg:{
        small:{range:"OpenAI/Anthropic API only",rec:"Use hosted APIs. Add a thin gateway layer in your code (model_client.complete()) so you can swap providers later. Cache aggressively (input hash → output).",tools:["OpenAI API","Anthropic","LiteLLM (multi-provider)","langchain"]},
        medium:{range:"Mix hosted + 1–2 self-hosted models",rec:"Self-host smaller models (7B–13B) on a single A100/H100 with vLLM or TGI. Reserve hosted APIs for hardest queries. Build a router (cheap model first, escalate on low confidence).",tools:["vLLM","TGI (HuggingFace)","Ollama","Modal","Replicate"]},
@@ -51,7 +57,10 @@ const PHASE_ML = {
      detail:{what:"A database optimized for similarity search over high-dimensional embeddings. Foundation of RAG, semantic search, recommendation, and dedup.",
        why:"Exact KNN over millions of 1536-dim vectors is O(N×D) = too slow. Vector DBs use Approximate Nearest Neighbor (HNSW, IVF, ScaNN) for sub-linear search at >95% recall.",
        numbers:"HNSW recall@10: 95–99% with M=16, efSearch=64. Memory: ~4 bytes × dims × N for FP32, halve for FP16. 100M × 1536-dim FP32 = 600GB. Use product quantization for 8–32× compression."},
-     tradeoffs:[{axis:"Recall vs Latency",left:"High efSearch: accurate",right:"Low efSearch: fast",pos:0.5},{axis:"Memory vs Disk",left:"In-memory: fast",right:"On-disk (DiskANN): cheap",pos:0.5}],
+     tradeoffs:[
+       {axis:"Vector search recall vs latency",left:"High efSearch (HNSW depth): 99% recall, 10–50ms per query",right:"Low efSearch: 90% recall, <1ms per query"},
+       {axis:"Vector index location",left:"In-memory index: <1ms lookup, RAM cost scales with corpus size",right:"On-disk (DiskANN - Disk Approximate Nearest Neighbor): handles billions per node, +5–20ms overhead"}
+     ],
      sizes_cfg:{
        small:{range:"<1M vectors",rec:"Use pgvector inside your existing Postgres. No new infra. HNSW index. Plenty fast for <1M vectors at <50ms p99.",tools:["pgvector","sqlite-vss","Chroma (local)"]},
        medium:{range:"1M–50M vectors",rec:"Dedicated vector DB. Qdrant or Weaviate self-hosted. Or Pinecone (managed). Hybrid search (BM25 + vector) for better recall on keyword queries.",tools:["Qdrant","Weaviate","Pinecone","Milvus","Vespa"]},
@@ -72,7 +81,10 @@ const PHASE_ML = {
      detail:{what:"The pipelines that take raw data, produce features, train models, evaluate, and deploy to serving infrastructure.",
        why:"Most ML projects fail in the gap between notebook and production. MLOps is the discipline that closes that gap with versioning, reproducibility, and continuous training.",
        numbers:"Training a 7B LLM from scratch: ~$100K–500K. Fine-tuning (LoRA): $10–500. Continuous pre-training: $5K–50K. Feature pipeline cost is often >50% of total ML infra spend."},
-     tradeoffs:[{axis:"Train from scratch vs Fine-tune",left:"Custom: $$$ + months",right:"Fine-tune: cheap + days",pos:0.7},{axis:"Online vs Batch features",left:"Online: fresh, complex",right:"Batch: stale, simple",pos:0.5}],
+     tradeoffs:[
+       {axis:"Model training approach",left:"Train from scratch: full control, $100K–500K in compute, 3–12 months",right:"Fine-tune an open base (Llama, Mistral, Qwen): days of work, $10K–100K, ceiling = base model capability"},
+       {axis:"Feature freshness",left:"Online feature store (Feast, custom): seconds-fresh, complex pipelines and storage",right:"Batch features (nightly job into warehouse): stale by hours/days, simple SQL-based pipelines"}
+     ],
      sizes_cfg:{
        medium:{range:"Few models, weekly retraining",rec:"Notebook → script → cron. Use managed training (SageMaker, Vertex AI). Track experiments with MLflow or W&B. Feature store optional.",tools:["MLflow","Weights & Biases","SageMaker","Vertex AI","DVC"]},
        large:{range:"10–100 models in production",rec:"Feature store (Feast/Tecton). Pipeline orchestrator (Airflow/Kubeflow/Dagster). Model registry. Shadow + canary deploys. Drift monitoring. Automated retraining on drift trigger.",tools:["Feast","Tecton","Kubeflow","Airflow","Dagster","Seldon","BentoML"]},

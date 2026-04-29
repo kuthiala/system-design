@@ -5,7 +5,10 @@ const PHASE_REALTIME = {
   detail:{what:"Sub-second push of data from server to client (chat, notifications, presence, collaborative editing, live dashboards, gaming).",
     why:"HTTP polling is wasteful (95% of polls return nothing) and slow (poll interval is your latency floor). Real-time requires persistent connections and a different ops model.",
     numbers:"WebSocket connection: ~10–50KB memory per conn. 1M concurrent → 10–50GB RAM. CPU bound at ~100K conns/core. Connection storms on deploy: warm slowly with stickiness."},
-  tradeoffs:[{axis:"Latency vs Cost",left:"WebSocket: persistent",right:"Polling: simple, wasteful",pos:0.7},{axis:"Push vs Pull",left:"Server push: complex",right:"Client poll: simple",pos:0.5}],
+  tradeoffs:[
+    {axis:"Connection model",left:"WebSocket (persistent): <100ms server→client, one TCP/TLS conn per user",right:"HTTP long-polling: works through any proxy, 5–30s latency per poll, wasteful reconnects"},
+    {axis:"Messaging pattern",left:"Server-initiated push: instant updates, requires sticky routing and persistent connection state",right:"Client polls every N seconds: stateless backend, wasteful bandwidth on idle clients"}
+  ],
   levelUp:[
     {from:"small",to:"medium",trigger:"Polling interval <5s or chat/collab feature",action:"WebSocket or SSE. Single Node.js/Go server. Sticky sessions on LB."},
     {from:"medium",to:"large",trigger:">10K concurrent connections or fan-out >1K subscribers per topic",action:"Dedicated real-time tier. Pub/sub backplane (Redis Streams/NATS). Connection sharding. Presence service."},
@@ -17,7 +20,9 @@ const PHASE_REALTIME = {
      detail:{what:"The wire-level mechanism for maintaining a low-latency channel between client and server.",
        why:"Each transport has different tradeoffs in firewall traversal, browser support, ordering, and HOL blocking.",
        numbers:"WebSocket: universal, TCP HOL-blocking. SSE: one-way, auto-reconnect built in. WebTransport (HTTP/3): UDP, no HOL, newer browser support. Long-polling: always works, expensive."},
-     tradeoffs:[{axis:"Reliability vs Latency",left:"TCP: ordered",right:"UDP/WebTransport: low-jitter",pos:0.5}],
+     tradeoffs:[
+       {axis:"Transport choice",left:"TCP (WebSocket): in-order delivery, head-of-line blocking on packet loss",right:"UDP / WebTransport (QUIC - Quick UDP Internet Connections): per-frame loss tolerated, low jitter, app handles ordering"}
+     ],
      sizes_cfg:{
        small:{range:"SSE for one-way, WS for two-way",rec:"Server-Sent Events for notifications/feeds (one-way). WebSocket if client must send. Falls back to long-polling automatically with Socket.IO.",tools:["Socket.IO","native WebSocket","SSE","Pusher (managed)"]},
        medium:{range:"Native WebSocket",rec:"Native WebSocket via Node.js (ws library) or Go (gorilla/websocket). Heartbeat every 30s. Reconnect with exponential backoff + jitter.",tools:["ws (node)","gorilla/websocket","Phoenix Channels (Elixir)","Ably (managed)"]},
@@ -42,7 +47,9 @@ const PHASE_REALTIME = {
      detail:{what:"The internal fabric that routes messages from a producer (e.g. message author) to all interested subscribers across many gateway nodes.",
        why:"With sharded gateways, the user receiving a message may be on a different node than the one the message was sent on. The backplane bridges them.",
        numbers:"Redis pub/sub: 100K msg/s, no persistence. NATS: 1M+ msg/s, JetStream for persistence. Kafka: durable but ~10–50ms added latency."},
-     tradeoffs:[{axis:"Latency vs Durability",left:"Redis pub/sub: fast, lossy",right:"Kafka: durable, slower",pos:0.5}],
+     tradeoffs:[
+       {axis:"Pub/sub backbone",left:"Redis pub/sub: <1ms fan-out, no message replay, drops on slow consumers",right:"Kafka: durable log, replayable, 5–20ms fan-out, handles partition rebalances"}
+     ],
      sizes_cfg:{
        medium:{range:"Redis pub/sub",rec:"Single Redis with pub/sub. Topic = user_id or room_id. Fine up to ~100K msg/s.",tools:["Redis pub/sub","Redis Streams"]},
        large:{range:"NATS or Redis Streams",rec:"NATS for low-latency at-most-once. JetStream for at-least-once with replay. Subject hierarchy for fan-out routing.",tools:["NATS","NATS JetStream","Redis Streams","Centrifugo"]},
@@ -61,7 +68,9 @@ const PHASE_REALTIME = {
      detail:{what:"Algorithms for merging concurrent edits to shared state (cursors, documents, drawings) without conflicts.",
        why:"Multiple users editing simultaneously create conflicts. The merge strategy determines correctness and UX.",
        numbers:"OT (Operational Transform): used by Google Docs, complex server logic. CRDT (Yjs/Automerge): no central server needed, larger metadata overhead (~10–30% per op)."},
-     tradeoffs:[{axis:"OT vs CRDT",left:"OT: smaller, server-coordinated",right:"CRDT: P2P-capable, larger",pos:0.6}],
+     tradeoffs:[
+       {axis:"Concurrency algorithm",left:"OT (Operational Transform): compact ops, requires central server to order them",right:"CRDT (Conflict-free Replicated Data Type): merges anywhere, P2P-capable, ~3–10× metadata overhead"}
+     ],
      sizes_cfg:{
        medium:{range:"Single-region OT or Yjs",rec:"Yjs for documents/drawings. ShareDB for OT. Server is authoritative; clients sync via WebSocket.",tools:["Yjs","Automerge","ShareDB","Liveblocks"]},
        large:{range:"Sharded with awareness service",rec:"Yjs with provider scaling: room-per-document, sharded by document ID. Awareness (cursors/presence) on separate channel — ephemeral, no persistence.",tools:["Yjs y-websocket","Hocuspocus","Liveblocks","custom OT server"]},

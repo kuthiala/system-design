@@ -7,7 +7,10 @@ const PHASE_COST = {
     why:"Cloud bills compound. A startup spending $10K/month at year 1 can hit $1M/month by year 3 if growth is unmanaged — and 30–40% of that is typically waste (idle dev environments, over-provisioned production, storage no one needs). Treating cost as 'someone else's problem' (the CFO's) means engineering decisions are made without visibility into their financial consequences. FinOps culture treats cost as a first-class engineering metric — alongside latency, error rate, and uptime — and reduces bills by 30–60% without performance regression.",
     numbers:"Savings stack: reserved instances / savings plans = 30–60% off on-demand for 1–3y commit. Spot instances = 60–90% off but interruptible (good for batch, ML, stateless). Right-sizing typically finds 20–30% savings (instances at <30% utilization). Storage lifecycle = 70–90% off for cold data moved to Glacier. Combined: a typical optimization project cuts bills 40–50% without changing the application."
   },
-  tradeoffs:[{axis:"Cost vs Reliability",left:"Spot: cheap but interruptible",right:"On-demand: expensive but stable",pos:0.5},{axis:"Optimization effort vs Savings",left:"Manual right-sizing: effort",right:"Auto-optimizer: lazy savings",pos:0.5}],
+  tradeoffs:[
+    {axis:"Compute purchase model",left:"Spot / preemptible: 60–90% off, reclaimed in 30s, only for interruption-tolerant work",right:"On-demand / reserved: full price, stable runtime, predictable for critical services"},
+    {axis:"Cost optimization approach",left:"Manual right-sizing per workload: deep wins, ongoing eng effort to maintain",right:"Auto-optimizer (Compute Optimizer, Karpenter): decent savings, zero eng time"}
+  ],
   pitfalls:[
     {name:"No tagging strategy",desc:"You can't tell which team / feature / customer is causing the bill. The CFO asks 'why is AWS up 40%?' and engineering can't answer. Tag everything (team, service, environment, cost-center) from day 1; enforce in CI/CD."},
     {name:"Idle non-prod environments",desc:"50 developer environments running 24/7. They're used 9-5 weekdays — that's 70% wasted runtime. Auto-shutdown nights/weekends saves 60% on non-prod immediately."},
