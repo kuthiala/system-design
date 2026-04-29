@@ -334,27 +334,84 @@ function buildSizeCards(cfg) {
 
 function buildTradeoffs(tradeoffs) {
   const items = tradeoffs.map(t => {
-    const pos = t.pos ?? 0.5;
-    const pct = pos * 100;
-    // left side is favored when pos < 0.5, right when pos > 0.5
-    const leftOp  = pos < 0.5 ? 1 : 0.45;
-    const rightOp = pos > 0.5 ? 1 : 0.45;
+    // Always start at 50%; the user drags to feel either extreme.
     return `<div class="ta">
       <div class="ta-name">↔ ${t.axis}</div>
       <div class="ta-labels">
-        <div class="ta-l" style="opacity:${leftOp}">${t.left}</div>
-        <div class="ta-r" style="opacity:${rightOp}">${t.right}</div>
+        <div class="ta-l">${t.left}</div>
+        <div class="ta-r">${t.right}</div>
       </div>
-      <div class="ta-track-wrap">
-        <div class="ta-track"><div class="ta-mk" style="left:${pct}%"></div></div>
-      </div>
-      <div class="ta-arrows">
-        <div class="ta-arrow-l">← more this</div>
-        <div class="ta-arrow-r">more this →</div>
+      <div class="ta-track-wrap" tabindex="0" role="slider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50">
+        <div class="ta-track"><div class="ta-mk" style="left:50%"></div></div>
       </div>
     </div>`;
   }).join("");
   return section("Tradeoff Axes", items);
+}
+
+// Apply opacities for a given normalized slider position [0..1]
+function paintTradeoff(taEl, pos) {
+  const mk    = taEl.querySelector(".ta-mk");
+  const left  = taEl.querySelector(".ta-l");
+  const right = taEl.querySelector(".ta-r");
+  const wrap  = taEl.querySelector(".ta-track-wrap");
+  if (!mk || !left || !right) return;
+  mk.style.left      = (pos * 100) + "%";
+  // 0.4 (dim) → 1.0 (full) curve so each side brightens as the marker approaches
+  left.style.opacity  = (0.4 + (1 - pos) * 0.6).toFixed(2);
+  right.style.opacity = (0.4 + pos       * 0.6).toFixed(2);
+  if (wrap) wrap.setAttribute("aria-valuenow", Math.round(pos * 100));
+}
+
+function wireTradeoffs() {
+  document.querySelectorAll(".ta").forEach(ta => {
+    const wrap = ta.querySelector(".ta-track-wrap");
+    if (!wrap) return;
+
+    // Initial paint at 50%
+    paintTradeoff(ta, 0.5);
+
+    const setFromClientX = clientX => {
+      const rect = wrap.getBoundingClientRect();
+      const pos  = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+      paintTradeoff(ta, pos);
+    };
+
+    let dragging = false;
+    wrap.addEventListener("pointerdown", e => {
+      dragging = true;
+      wrap.setPointerCapture?.(e.pointerId);
+      setFromClientX(e.clientX);
+      e.preventDefault();
+    });
+    wrap.addEventListener("pointermove", e => {
+      if (dragging) setFromClientX(e.clientX);
+    });
+    const stop = e => {
+      if (!dragging) return;
+      dragging = false;
+      try { wrap.releasePointerCapture?.(e.pointerId); } catch {}
+    };
+    wrap.addEventListener("pointerup", stop);
+    wrap.addEventListener("pointercancel", stop);
+
+    // Keyboard: arrow keys to nudge
+    wrap.addEventListener("keydown", e => {
+      const cur = parseFloat(wrap.getAttribute("aria-valuenow") || "50") / 100;
+      const step = 0.05;
+      if (e.key === "ArrowLeft" || e.key === "ArrowDown") {
+        paintTradeoff(ta, Math.max(0, cur - step));
+        e.preventDefault();
+      } else if (e.key === "ArrowRight" || e.key === "ArrowUp") {
+        paintTradeoff(ta, Math.min(1, cur + step));
+        e.preventDefault();
+      } else if (e.key === "Home") {
+        paintTradeoff(ta, 0); e.preventDefault();
+      } else if (e.key === "End") {
+        paintTradeoff(ta, 1); e.preventDefault();
+      }
+    });
+  });
 }
 
 function buildLevelUps(levelUps) {
@@ -471,6 +528,8 @@ function showDetail(node) {
   if (activeExample)                   html += buildExampleOverlay(node);
 
   document.getElementById("dp-body").innerHTML = html;
+
+  wireTradeoffs();
 
   // Wire up related-concept navigation links
   document.querySelectorAll(".rel-link").forEach(el => {
