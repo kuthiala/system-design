@@ -1,0 +1,349 @@
+{
+  "name": "Phase 9 · Reliability & DR",
+  "id": "reliability",
+  "icon": "🛟",
+  "phase": "Reliability",
+  "color": "#dc2626",
+  "sizes": [
+    "small",
+    "medium",
+    "large",
+    "hyper"
+  ],
+  "short": "Backups → multi-AZ → multi-region → active-active — because failure is inevitable, but outages are a choice",
+  "detail": {
+    "what": "Reliability engineering is the discipline of designing systems that continue operating correctly in the presence of failure — and failure WILL happen. It encompasses five failure domains: (1) Hardware failures — disks develop bad sectors (annual failure rate 2–8% depending on age and model), NICs drop packets, entire machines die from power supply failures, RAM develops bit-flip errors. (2) Software failures — bugs that only manifest under specific load or data conditions, memory leaks that slowly exhaust resources over days, deadlocks that freeze threads, goroutine leaks in Go, event loop stalls in Node.js. (3) Network failures — partitions where two halves of your cluster can't talk to each other, latency spikes from congested switches, packet loss from overloaded interfaces, BGP route leaks that send your traffic to the wrong continent, submarine cable cuts that sever entire continents. (4) Human failures — bad deploys (the #1 cause of outages at most companies, responsible for ~60–70% of incidents per Google SRE data), fat-finger config changes, 'rm -rf' on the wrong directory, rotating a secret and forgetting one consumer. (5) Environmental failures — entire availability zone power outages, regional cloud control-plane failures (us-east-1 has had multiple multi-hour outages), datacenter cooling failures, natural disasters. Disaster Recovery (DR) is the worst-case subset: the playbook for restoring service after a catastrophic, region-level event. Together, reliability practices, redundancy layers, and automated recovery mechanisms transform a system from one that falls over at the first unexpected event into one that absorbs failures silently while users remain blissfully unaware. Think of reliability engineering as the immune system of your architecture: a healthy immune system doesn't prevent exposure to pathogens — it ensures the body recovers quickly and quietly without the person noticing.",
+    "why": "Failure is not a question of 'if' but 'when' and 'how often.' A standard hard drive has a 2–8% annual failure rate. An EC2 instance has roughly a 0.5–2% monthly failure rate depending on instance family and region. AWS has had at least one significant region-level incident per year for the last decade (the us-east-1 outage in December 2021 lasted over 7 hours and cascaded to break everything from Slack to robot vacuums). Every server you run WILL eventually crash. Every network link WILL eventually drop. Every deploy WILL eventually go wrong. The only question is whether your system has been engineered to survive these events transparently — or whether you'll spend hours in a war room doing manual recovery while revenue bleeds, users churn, and your brand takes damage. The economics are stark: for a B2B SaaS doing $10M ARR, even 99.9% availability means 8.7 hours of downtime per year. If an hour of downtime costs $50K in SLA credits, lost transactions, and customer trust erosion, that's $435K/year — dwarfing the cost of multi-AZ infrastructure. But over-investing is equally wasteful: going from 99.99% to 99.999% might cost an additional $2M/year in multi-region active-active infrastructure, SRE salaries, and operational overhead. If your downtime cost doesn't justify that spend, the money is better invested in features. The key insight from Google's SRE book: reliability is not a binary — it's a dial you turn based on business value, user expectations, and cost tolerance. The error budget concept makes this concrete: if your SLO is 99.9%, you have a 0.1% error budget per month (~43 minutes). Spend it on fast deploys and experiments. When it's exhausted, freeze changes and stabilize. This creates a natural, healthy tension between innovation speed and reliability.",
+    "numbers": "MTTR (Mean Time To Recovery) targets by tier — this is the single most important reliability metric because it's what users actually experience: small <4h (manual intervention acceptable, restore from backup), medium <30min (automated failover within region, on-call engineer confirms), large <5min (fully automated failover across AZs, no human needed), hyper <30s (automated, pre-tested failover across regions, traffic reroutes before users notice). RPO (Recovery Point Objective — how much data you can afford to lose) targets: backups-only = hours of data loss (last nightly backup), async replication = seconds-to-minutes (replication lag window), sync replication = 0 (but with write latency cost of 5–15ms per write). MTTD (Mean Time To Detect — how fast you realize there's a problem) is the hidden metric: the time between when a failure occurs and when your system or team notices. Industry average is 20–60 minutes for many companies; elite teams detect in <1 minute via synthetic monitoring and SLO alerting. MTTR = MTTD + time-to-diagnose + time-to-fix + time-to-verify. Cutting MTTD from 30 minutes to 1 minute improves your effective MTTR by 29 minutes — often more impactful than faster failover. Industry benchmarks: AWS region-level outage probability is roughly 1 per region per 1–3 years. Multi-AZ failover latency: ~30–60s automated via managed services (RDS Multi-AZ, ECS). Multi-region failover: 5–15 minutes if practiced quarterly with real drills, 30–120 minutes if the runbook has never been tested in anger. The gap between 'practiced' and 'unpracticed' DR is the difference between a minor incident and a career-defining catastrophe."
+  },
+  "coreFormulas": [
+    {
+      "name": "Series Availability",
+      "expr": "A_system = A_1 × A_2 × ... × A_n",
+      "note": "5 services in series each at 99.9% = 0.999^5 = 99.5% system availability — that's 3.65 hours/month down, not 43 minutes. Every additional serial dependency makes the system LESS available. This is why reducing dependency chains is one of the highest-leverage reliability improvements."
+    },
+    {
+      "name": "Parallel (Redundant) Availability",
+      "expr": "A_parallel = 1 - (1 - A_single)^N",
+      "note": "Two instances each at 99.9% in parallel = 1 - (0.001)^2 = 99.9999%. Redundancy is exponentially powerful — two mediocre components in parallel are more available than one excellent component."
+    },
+    {
+      "name": "Error Budget",
+      "expr": "budget_minutes = (1 - SLO) × minutes_in_window",
+      "note": "99.9% SLO over 30 days = 0.001 × 43,200 = 43.2 minutes of allowed downtime. Track burn rate: if you've used 30 minutes by day 15, you're burning at 2× rate and should slow deployments."
+    },
+    {
+      "name": "Incident Cost",
+      "expr": "cost = (direct_revenue_loss + SLA_credits + engineering_hours × hourly_rate + customer_churn_value) × duration_hours",
+      "note": "This formula justifies every reliability investment. A 1-hour outage for a $10M ARR SaaS might cost $5K direct + $10K SLA credits + $5K engineering + $30K estimated churn = $50K. If going multi-AZ costs $40K/year and prevents 2 such incidents, it pays for itself in one quarter."
+    }
+  ],
+  "tradeoffs": [
+    {
+      "axis": "Cost vs Resilience",
+      "left": "Single region, single AZ: cheapest, simplest ops, but one failure domain — one bad switch and you're down",
+      "right": "Multi-region active-active: survives any single failure, but 3–10× the infrastructure cost, distributed data consistency challenges, and significantly more operational complexity",
+      "pos": 0.5
+    },
+    {
+      "axis": "RTO vs Complexity",
+      "left": "Fast recovery (<1min): requires automated failover, health-aware routing, pre-warmed standby, continuous chaos validation — complex but invisible to users",
+      "right": "Slow recovery (hours): simple architecture, manual runbooks, restore from backup — cheap to build but every outage is a multi-hour customer-facing event",
+      "pos": 0.5
+    },
+    {
+      "axis": "Availability vs Consistency (during partition)",
+      "left": "Choose Availability (AP): system continues serving requests during network partition, but may return stale or conflicting data — Cassandra, DynamoDB default mode",
+      "right": "Choose Consistency (CP): system refuses writes during partition to prevent inconsistency, temporarily unavailable — ZooKeeper, etcd, Spanner",
+      "pos": 0.5
+    }
+  ],
+  "principles": [
+    {
+      "name": "Design for Failure, Not Against It",
+      "desc": "Don't try to prevent all failures — you can't. Instead, assume every component will fail and design the system to degrade gracefully. Netflix's entire reliability philosophy starts from 'what happens when this breaks?' not 'how do I keep this from breaking?' Every dependency should have a timeout, a fallback, and a plan for total loss. The question isn't 'will the database crash?' — it's 'what does the user see when the database crashes?'"
+    },
+    {
+      "name": "Blast Radius Containment",
+      "desc": "Every failure should be contained to the smallest possible scope. A bad deploy should affect one canary pod, not 100% of traffic. A noisy tenant should affect one cell, not all customers. A region outage should affect one geography, not the world. Architectural tools for containment: cell architecture (each cell serves N% of users independently), bulkheading (separate thread/connection pools per dependency), canary deployments (1% → 5% → 25% → 100%), feature flags (disable a broken feature without rolling back the entire deploy)."
+    },
+    {
+      "name": "Error Budgets Over Zero-Defect Mentality",
+      "desc": "Perfection is the enemy of velocity. An error budget (the allowed unreliability implied by your SLO) is a contract: 'we accept this much failure in exchange for moving fast.' When budget is plentiful, ship aggressively. When budget is depleted, freeze deploys and invest in stability. This transforms reliability from a vague aspiration into a measurable, negotiable resource — just like money or engineering time."
+    },
+    {
+      "name": "Recovery Speed Beats Failure Prevention",
+      "desc": "You will never prevent all failures. But you can recover from most of them in under a minute with automation. An MTTR of 30 seconds from an automated failover is worth more than preventing 90% of failures manually — because the 10% you miss still cause multi-hour outages. Invest in detection speed (synthetic monitoring, SLO-based alerting) and recovery automation (auto-failover, auto-rollback, auto-scaling) over prevention alone."
+    }
+  ],
+  "pitfalls": [
+    {
+      "name": "Untested DR plan — the plan that hasn't been tested is not a plan, it's a wish",
+      "desc": "Your runbook says 'failover to us-west-2' — but it's never been executed in anger. On the day of the real outage, you discover: the IAM roles in us-west-2 weren't updated 6 months ago when you changed the policy, the DB snapshot is 12 hours stale because the cross-region replication job silently failed last week, DNS TTLs are set to 3600s (1 hour) so even after you switch, clients keep hitting the dead region for an hour, and the new region doesn't have the latest config secrets because someone forgot to sync Vault. What should have been a 5-minute failover becomes a 4-hour scramble. The fix: practice DR quarterly with real failovers — actually shift production traffic to the DR region, verify everything works, then shift back. GameDay exercises (coined by Jesse Robbins at Amazon) make this a scheduled, rehearsed event rather than an adrenaline-soaked crisis. The best time to discover your DR plan is broken is during a drill on a Tuesday afternoon, not during a real outage at 3am on Saturday."
+    },
+    {
+      "name": "Single region 'because it's HA' — multi-AZ is not multi-region",
+      "desc": "Multi-AZ protects against a single datacenter failure within a region. But AWS us-east-1 has had multiple multi-hour control-plane outages where ALL AZs in the region were affected simultaneously — the failure was in the regional control plane (the APIs that manage EC2, RDS, Lambda, etc.), not in individual AZs. During the December 2021 us-east-1 outage, companies that were 'highly available' within us-east-1 were still completely down for 7+ hours. If your business cannot tolerate a multi-hour outage (cost >$100K/hr, regulatory requirement, user safety), you need multi-region — meaning a fully independent copy of your system in a second region that can serve traffic when the first region is completely gone. Multi-AZ is the foundation; multi-region is the roof."
+    },
+    {
+      "name": "Cascading failures from missing circuit breakers — the domino effect",
+      "desc": "Service A calls Service B with a 30-second timeout. Service B becomes slow (not down — slow, which is actually worse). A's threads hang waiting for B. A's thread pool exhausts. A starts rejecting all requests — including ones that don't involve B. Callers of A start timing out and exhausting their pools. Within minutes, a single slow service has taken down the entire system like dominoes. This is the most common failure pattern in microservices architectures. The fix: circuit breakers on every external call (trip open after 50% failure rate over 10 seconds, fail fast in <1ms, probe recovery every 5 seconds), timeouts set aggressively (95th percentile of healthy latency × 1.5, never longer than the caller's own SLO), and bulkheads (separate thread pools per dependency so exhaustion of one doesn't affect others). Resilience4j (Java), Polly (.NET), opossum (Node.js), or Envoy's built-in circuit breaking handle this. Without these, your microservices architecture is a cascading-failure machine."
+    },
+    {
+      "name": "No load shedding under overload — trying to serve everyone and serving no one",
+      "desc": "Traffic spikes 5× unexpectedly. Your servers try to handle all requests. CPU goes to 100%. Every request takes 10 seconds instead of 200ms. Timeouts fire everywhere. Retries multiply the load further (retry storm). The system enters a death spiral where it's doing enormous work but completing nothing useful — 100% CPU, 0% successful responses. The solution is load shedding: when the system detects overload, deliberately reject a percentage of requests immediately with 503 (Service Unavailable) + Retry-After header. This keeps the remaining requests fast and successful. It's counterintuitive — serving fewer requests results in completing MORE requests successfully. Implementation: use an adaptive concurrency limiter (Netflix concurrency-limits library, Envoy's adaptive concurrency filter) that automatically adjusts based on observed latency. When latency increases beyond healthy baseline, the limiter reduces admitted requests. Think of it like a nightclub bouncer: letting in 200 people when capacity is 150 means nobody has fun; turning away 50 means 150 people have a great time."
+    },
+    {
+      "name": "Monitoring availability but not correctness",
+      "desc": "Your health check returns 200 OK because the process is running. But the DB connection pool is exhausted, the cache is returning stale data from 6 hours ago, and the payment processor integration is silently failing. Your monitoring shows green — '100% uptime!' — while users experience a completely broken application. Health checks must be deep: verify the actual critical path works (can you read from DB? can you write to cache? can you reach the payment processor? does a synthetic transaction succeed end-to-end?). Synthetic monitoring — continuously running real user transactions from multiple geographic points — is the gold standard. If a synthetic checkout succeeds from 5 PoPs every 30 seconds, you have high confidence the system is actually working, not just 'up.'"
+    }
+  ],
+  "examples": [
+    {
+      "name": "Netflix Chaos Monkey — engineering reliability through deliberate destruction",
+      "desc": "Built in 2010 by Netflix's reliability team, Chaos Monkey randomly terminates EC2 instances in production during business hours. The philosophy: if you can't survive random instance death during a normal business day, you definitely can't survive it during a traffic peak at 3am. By making failure routine, Netflix forced every team to build resilience as a default, not an afterthought. The result is quantifiable: during the December 2021 AWS us-east-1 outage that took down much of the internet (Slack, Imgur, League of Legends, McDonald's app, many others), Netflix continued streaming with minimal user impact because their architecture was designed to survive exactly this scenario — they'd already 'practiced' it thousands of times through chaos experiments. Netflix later expanded the approach into the 'Simian Army': Chaos Gorilla (kills an entire AZ), Chaos Kong (simulates a region outage), Latency Monkey (injects delays), Conformity Monkey (finds instances not adhering to best practices). The lesson: the organizations that are most reliable are the ones that deliberately break things most often. Failure-as-test is not reckless — it's the most rigorous form of reliability validation."
+    },
+    {
+      "name": "Cloudflare's 2019 regex outage — blast radius matters more than bug prevention",
+      "desc": "On July 2, 2019, a Cloudflare engineer deployed a WAF rule containing a poorly-written regular expression. The regex caused catastrophic backtracking, consuming 100% CPU on every machine in Cloudflare's fleet simultaneously. Because the rule was deployed globally and instantly (no canary, no staged rollout), all of Cloudflare went down for 27 minutes — affecting millions of websites and APIs that depend on Cloudflare's proxy. The root cause was a regex bug, but the real failure was the deployment process: one change went to 100% of production instantly. Cloudflare's post-mortem led to fundamental changes: staged deployments (canary in one PoP → one region → globally), per-PoP circuit breakers (if CPU spikes above threshold, the PoP stops applying new rules), and WAF rule simulation mode (test against sampled traffic before enforcing). The lesson: you will never prevent all bugs. The question is whether a bug affects 1% of users for 30 seconds (good blast radius containment) or 100% of users for 30 minutes (bad). Every deploy, every config change, every rule update should have a blast radius limiter."
+    },
+    {
+      "name": "GitHub's October 2018 database incident — 24 hours of degraded service from a 43-second network partition",
+      "desc": "A routine network maintenance operation caused a 43-second connectivity loss between GitHub's US East Coast data center and its US West Coast data center. The MySQL primary in the East Coast cluster lost connectivity to its West Coast replicas. Orchestrator (GitHub's automated failover tool) correctly detected the failure and promoted a West Coast replica to primary. But when connectivity restored 43 seconds later, both clusters had accepted writes — creating divergent data across two primaries (split-brain). Reconciling the divergent data took over 24 hours of careful, manual work. Lessons: (1) Automated failover must account for transient network issues (add a delay before promoting — is the primary truly dead, or is the network blipping?), (2) Split-brain prevention requires fencing tokens or STONITH ('Shoot The Other Node In The Head'), (3) Data reconciliation is the hardest part of any failover — practice it before you need it, (4) A 43-second hiccup cascaded into 24 hours of degradation because the recovery path wasn't fully automated. This incident led GitHub to invest heavily in Raft-based consensus for their MySQL topology."
+    }
+  ],
+  "levelUp": [
+    {
+      "from": "small",
+      "to": "medium",
+      "trigger": "Any outage costs >$10K in revenue, reputation, or SLA credits, OR you've signed a customer SLA with uptime commitment, OR you've experienced your first multi-hour recovery from a single-server failure",
+      "action": "Move to multi-AZ deployment — this is the single highest-ROI reliability investment. Concretely: (1) Migrate your database to a managed multi-AZ service (AWS RDS Multi-AZ: your primary in AZ-a, a synchronous standby in AZ-b, automatic failover in ~30–60s — costs ~2× a single-AZ instance but eliminates the most common single point of failure). (2) Deploy your application across at least 2 AZs behind a load balancer (AWS ALB or Cloudflare) with health checks every 10 seconds and a 2-failure threshold (unhealthy instance removed within 20 seconds). (3) Implement automated restart on crash — containerize your app (Docker) and run it on ECS or a managed platform (Railway, Render) that automatically replaces crashed containers. (4) Establish on-call rotation with PagerDuty or OpsGenie, even if it's just 2 engineers trading weeks. Write a runbook for the top 5 failure scenarios ('DB is slow,' 'app is OOM,' 'deploy failed,' 'external API is down,' 'disk full'). (5) Set up basic synthetic monitoring: a health-check endpoint that exercises DB + cache, polled every 30 seconds by UptimeRobot or Better Uptime, alerting via PagerDuty if 2 consecutive checks fail. Total cost increase: ~$200–500/month for multi-AZ managed DB + monitoring tools. This gets you from 'hope nothing breaks' to 'automated recovery from the most common failures.'"
+    },
+    {
+      "from": "medium",
+      "to": "large",
+      "trigger": "Outage cost >$100K/hr, OR regulatory requirement (PCI-DSS, HIPAA, SOC2), OR you've experienced a regional cloud outage that affected your multi-AZ setup, OR customer contracts require >99.95% uptime",
+      "action": "Multi-region active-passive with automated failover and continuous validation. Here's the implementation roadmap: (1) Stand up a complete copy of your infrastructure in a second region (e.g., us-west-2 if primary is us-east-1). Use Terraform modules that parameterize by region so you can deploy identical infrastructure anywhere. The passive region should run at reduced capacity (30–50% of primary) to save cost but be auto-scalable. (2) Set up cross-region database replication: for RDS, use cross-region read replicas with async replication (typical lag: 100ms–5s). For critical data requiring zero RPO, use Aurora Global Database (dedicated replication infrastructure, <1s lag typically, promotes in <1 minute). Accept that cross-region replication is async — you may lose seconds of writes during failover. Document the RPO explicitly. (3) Implement automated failover: Route53 health checks monitor your primary region's health endpoint every 10 seconds. If 3 consecutive checks fail (30 seconds), Route53 automatically switches DNS to the passive region. Set DNS TTL to 60 seconds so clients pick up the change within ~90 seconds. The passive region auto-scales up on traffic arrival. (4) Add circuit breakers (Resilience4j for Java/Kotlin, Polly for .NET, opossum for Node.js, or Envoy sidecar for any language) on every external service call — open after 50% failure rate over 10s, fallback to cached data or graceful degradation. (5) Start chaos engineering: begin with monthly 'GameDay' exercises in staging — kill instances, inject latency, simulate AZ failure. Use AWS Fault Injection Simulator (FIS) or Gremlin for controlled experiments. Graduate to production chaos after 3 successful staging exercises. The key: every chaos experiment should have a hypothesis ('if we kill 1 of 3 app instances, p99 latency increases <20% and error rate stays <0.1%') and an abort condition ('if error rate >1%, stop immediately'). (6) Establish a formal incident response process: incident commander (makes decisions), communications lead (updates status page and stakeholders), and subject matter experts. Use a war-room Slack channel with a bot that timestamps everything for the post-mortem. Total cost increase: ~$3K–15K/month depending on scale. Time to implement: 2–4 months for a mid-sized engineering team."
+    },
+    {
+      "from": "large",
+      "to": "hyper",
+      "trigger": "Any downtime is unacceptable — financial infrastructure (payments, trading), life-safety systems (medical, aviation), critical communications (emergency services), or your SLO requires 99.999% (26 seconds/month)",
+      "action": "Multi-region active-active with cell architecture, continuous chaos, and zero-downtime everything. This is the most complex and expensive tier, typically requiring a dedicated SRE team and 6–12 months of build-out: (1) Active-active multi-region: every region serves live read AND write traffic simultaneously. This requires either a globally distributed database (Google Spanner: $0.90/node-hr, global strong consistency via TrueTime; CockroachDB: open-source, Raft-based, SERIALIZABLE by default; DynamoDB Global Tables: eventually consistent cross-region, ~$0.000975/WRU) or a custom replication layer with conflict resolution (CRDTs for counters/sets, last-writer-wins for simple fields, application-level merge for complex cases). Route users to their nearest region via anycast DNS or Global Accelerator. (2) Cell architecture: divide your total user base into cells (each cell typically 0.5–5% of users). Each cell is a complete, independent copy of the entire stack — its own DB shard, its own cache cluster, its own application fleet, its own queue. A catastrophic failure (bad deploy, data corruption, resource exhaustion) in one cell affects only that cell's users, not everyone. Cells should share NOTHING stateful — a dependency shared across cells (e.g., a global auth service) is a single point of failure that defeats the purpose. AWS internally uses cells extensively; Salesforce calls them 'pods'; Slack calls them 'shards.' Assign users to cells via consistent hashing on user_id. Build a cell router at the edge that maps user → cell → backend fleet. (3) N+2 redundancy at every layer: if you need 8 cells to serve your load, run 10. If you need 3 DB replicas, run 5. N+2 means you can lose 2 of anything simultaneously (maintenance on one while another fails unexpectedly) without impact. (4) Zero-downtime deploys via progressive delivery: canary (deploy to 1 cell) → observe metrics for 15 minutes → expand to 5% of cells → observe → 25% → 100%. Automated rollback: if error rate or p99 latency in the canary cell exceeds baseline by >20%, immediately roll back without human intervention. Tools: Spinnaker (Netflix's deploy tool, supports multi-cloud canary analysis), ArgoCD with Argo Rollouts (Kubernetes-native progressive delivery), Flagger (another K8s canary tool), or custom deploy orchestration. (5) Continuous chaos in production: not monthly exercises — always-on, low-rate failure injection. Example: 0.01% of requests in every cell get 100ms extra latency injected, 0.001% get a 503 response, 1 random instance per cell is killed per hour. This continuously validates that resilience mechanisms are working. When they're not, you find out on a Tuesday at 2pm, not during a real outage on a Saturday at 3am. Tools: Gremlin Enterprise ($80/host/month for managed chaos), AWS FIS (native, limited experiment types), custom chaos controller that integrates with your cell architecture. (6) Automated runbooks for all known failure modes: rather than paging a human who reads a document and executes steps, encode the runbook as code that executes automatically. Human is notified and can intervene, but recovery doesn't wait for them. Tools: PagerDuty Automation Actions, Rundeck, AWS Systems Manager Automation, or custom bots. Total cost: typically 10–50× your single-region cost, plus 1 SRE per 5–10 services. Time to implement: 6–18 months with a dedicated team. This is the architecture of Stripe, Google, Netflix, and AWS itself."
+    }
+  ],
+  "antiPatterns": [
+    {
+      "name": "Reliability Theater",
+      "desc": "You have a status page, an on-call rotation, and a DR runbook — but the status page is manually updated (so it shows green during outages), the on-call engineer has never been paged (so they don't know the systems), and the DR runbook was written 2 years ago and never tested (so half the steps are wrong). This is the organizational equivalent of a fire extinguisher that's never been inspected — it gives the appearance of safety without the substance. Fix: automate the status page (aggregate from real health checks), rotate on-call to build knowledge across the team, and execute the DR runbook quarterly in production."
+    },
+    {
+      "name": "Retry Storm Amplification",
+      "desc": "Service A calls Service B. B is slow, so A's requests time out. A retries 3 times. B is now getting 4× the traffic (original + 3 retries) — making it even slower. A's callers see A slow down and retry THEIR calls to A. Now B is getting 4×4 = 16× the original traffic. The entire system collapses under an exponentially amplified retry storm. Fix: exponential backoff with full jitter (AWS's recommended formula: sleep = random(0, min(cap, base × 2^attempt))), retry budgets (only retry if <10% of recent requests were retries — stops amplification), and circuit breakers (stop retrying entirely when the downstream is clearly down)."
+    },
+    {
+      "name": "Correlated Failures from Shared Dependencies",
+      "desc": "Services A, B, and C are all 'independent' — separate repos, separate deploys, separate teams. But they all depend on the same Redis cluster for caching. Redis cluster has a blip → A, B, and C all degrade simultaneously → cascading failures across the system. Your 'independent' services weren't actually independent because they shared a critical dependency. Map your dependency graph (tools: Backstage service catalog, custom dependency map). Every shared dependency is a single point of failure. Either make it extremely highly available (Redis Cluster with replicas across AZs, 99.99%+) or give each service its own instance."
+    }
+  ],
+  "sizes_cfg": {
+    "small": {
+      "range": "99.9% SLO (43 min downtime/month, 8.7h/year) — acceptable for early-stage products, internal tools, and non-revenue-critical services",
+      "rec": "The goal at this tier is simple: recover from the most common failure (server death) within hours, not days. (1) Daily automated DB backups to a separate region — use managed services that do this automatically (AWS RDS retains automated backups for up to 35 days with point-in-time recovery to any second within the retention window — enabled by default, costs only the storage of the backups). Test restoration quarterly: actually restore a backup to a fresh instance and verify data integrity. An untested backup is not a backup. (2) Basic health check + auto-restart: if your app runs on a managed platform (Railway, Render, Fly.io), crash recovery is built in — the platform automatically restarts crashed processes within seconds. If self-hosted, use Docker with restart policies or systemd service units. (3) Error alerting: Sentry (free for 5K events/month, captures exceptions with full stack traces + context) alerts you when new errors appear. UptimeRobot (free for 50 monitors) pings your health endpoint every 5 minutes and alerts via email/Slack/PagerDuty when it's down. (4) Manual runbook: write a Google Doc with step-by-step instructions for the top 5 failure scenarios. Include exact commands, not just descriptions. 'SSH into server X, run pg_restore...' not 'restore the database.' (5) Single on-call engineer — at this stage, the person who built it is the person who fixes it. Technology comparison: UptimeRobot (free, simple HTTP checks every 5 min) vs Better Uptime ($20/month, multi-location checks every 30s, built-in status page, incident management) vs Pingdom ($15/month, more advanced checks, RUM). Sentry (best error tracking, free tier generous) vs Bugsnag (similar, slightly better for mobile) vs Rollbar (similar, better Slack integration). For backups: managed DB services (RDS, Cloud SQL, PlanetScale) handle this automatically — strongly prefer them over self-managed PostgreSQL where backup is your responsibility.",
+      "tools": [
+        "AWS RDS automated backup",
+        "UptimeRobot",
+        "Better Uptime",
+        "PagerDuty free tier",
+        "Sentry"
+      ]
+    },
+    "medium": {
+      "range": "99.95% SLO (22 min downtime/month, 4.4h/year) — standard for B2B SaaS, e-commerce, and any product with paying customers who expect reliability",
+      "rec": "The key upgrade: eliminate single points of failure within a region via multi-AZ, and detect problems in minutes, not hours. (1) Multi-AZ database failover: AWS RDS Multi-AZ maintains a synchronous standby replica in a different AZ. If the primary AZ fails (hardware, network, or entire AZ outage), RDS automatically promotes the standby and updates the DNS endpoint — your application reconnects within 30–60 seconds without code changes. Cost: ~2× single-AZ pricing. Google Cloud SQL HA and Azure SQL Managed Instance offer equivalent functionality. (2) Multi-AZ compute: spread your application instances across at least 2 AZs via an Auto Scaling Group (AWS) or Managed Instance Group (GCP). The load balancer (ALB) automatically routes traffic only to healthy instances. If an entire AZ goes down, the surviving AZ handles all traffic (ensure each AZ can handle 100% of peak load — if you normally run 4 instances across 2 AZs, each AZ should be able to handle the full load on its 2 instances). (3) Health checks: the load balancer checks /health every 30 seconds. Your /health endpoint should verify critical dependencies: can it query the database? Can it reach Redis? If any critical dependency is unreachable, return 503 so the LB stops sending traffic to that instance. Unhealthy instances are replaced automatically. (4) SLO-based alerting: don't alert on 'CPU > 80%' (leads to alert fatigue from benign spikes). Alert on 'error rate > 1% for > 5 minutes' or 'p99 latency > 2× baseline for > 5 minutes' — these directly indicate user impact. Use Datadog SLO monitors ($23/SLO/month) or Prometheus + Grafana alerting (free, self-hosted). (5) Incident response: PagerDuty ($21/user/month) or OpsGenie ($9/user/month) for on-call scheduling, escalation policies, and incident tracking. Establish a simple incident process: detect → page → acknowledge within 15 min → diagnose → fix → post-mortem within 48 hours. (6) Runbook automation: start encoding your manual runbook steps as scripts. 'Restart the app' should be a button in your deploy tool, not an SSH session. Technology comparison: PagerDuty vs OpsGenie — PagerDuty is the industry standard with the richest integration ecosystem (750+ integrations) but more expensive ($21/user/month); OpsGenie (Atlassian) is cheaper ($9/user/month) and deeply integrated with Jira/Confluence but has a smaller integration ecosystem. For monitoring: Datadog (comprehensive but expensive at scale, $15/host/month infra + $31/host APM + $23/SLO monitor) vs Prometheus + Grafana (free, powerful, requires self-hosting and expertise) vs NewRelic (generous free tier of 100GB/month ingest, good APM).",
+      "tools": [
+        "AWS RDS Multi-AZ",
+        "Cloud SQL HA",
+        "Route53 health checks",
+        "PagerDuty",
+        "OpsGenie",
+        "Datadog SLO monitors",
+        "Prometheus + Grafana"
+      ]
+    },
+    "large": {
+      "range": "99.99% SLO (4.4 min downtime/month, 52 min/year) — required for financial services, healthcare, enterprise SaaS with strict SLAs, and any system where downtime directly equals significant revenue loss",
+      "rec": "The defining characteristic of this tier: you can survive an entire region going offline, and failures are detected and mitigated automatically without human intervention in the critical path. (1) Multi-region active-passive: primary region serves all traffic; secondary region has warm standby with continuously replicated data. Automated failover via Route53 (health check fails → DNS switches to secondary within 60–90 seconds with TTL=60s). Use AWS Aurora Global Database for cross-region DB replication with <1 second lag and promotion in <1 minute. Compute in the secondary region runs at reduced scale (30–50%) with auto-scaling enabled to absorb full traffic on failover. Test failover quarterly by actually shifting production traffic to the secondary region. (2) Circuit breakers on every external service call: use Resilience4j (Java — the industry standard, succeeded Netflix Hystrix), Polly (.NET — Microsoft's recommended resilience library), opossum (Node.js), or deploy Envoy sidecar proxy which provides circuit breaking, retry, and timeout at the network level without application code changes. Configure: open after 50% failure rate over 10-second sliding window (minimum 20 requests to avoid false positives), half-open after 30 seconds (send 1 probe request), close after 5 consecutive successes. Every breaker must have a defined fallback: cached data, default value, degraded functionality, or explicit error with retry guidance. (3) Chaos engineering: monthly controlled experiments that validate your resilience mechanisms actually work. Start with instance termination (Chaos Monkey pattern), graduate to AZ failure simulation, latency injection, and dependency failure. Tools: AWS Fault Injection Simulator (FIS — native AWS, supports EC2 termination, ECS/EKS disruption, network disruption, RDS failover, $0 for the tool but you pay for affected resources), Gremlin ($80/host/month — managed platform with rich experiment types, blast radius controls, and halt conditions), Chaos Mesh (free, Kubernetes-native, excellent for K8s environments), Litmus (free, K8s-native, CNCF project). Key principle: every chaos experiment needs a hypothesis, a blast radius limit, and a halt condition. (4) SRE team or SRE-minded practices: at this tier, reliability is not an afterthought — it's someone's full-time job. Establish formal SLO tracking, error budgets, and blameless post-mortems for every incident. Google's SRE book (free online) is the foundational text. (5) Load shedding: implement adaptive concurrency limiting (Netflix concurrency-limits library for Java, or Envoy's adaptive concurrency filter) that automatically reduces admitted traffic when latency increases. This prevents the death spiral described in pitfalls. Technology comparison for circuit breakers: Resilience4j (Java, lightweight, functional API, actively maintained, built for modern Java 8+) vs Hystrix (Netflix, Java, proven at massive scale but deprecated since 2018 — use Resilience4j for new projects). For chaos: Gremlin (easiest to use, widest experiment types, best safety controls, but expensive at scale) vs AWS FIS (free tool, good for AWS-native experiments, limited experiment types) vs Chaos Mesh (free, K8s-only, very powerful for Kubernetes environments). For service mesh circuit breaking: Istio (most feature-rich, heaviest resource footprint — ~100MB memory per sidecar) vs Linkerd (lightest weight — ~10MB per sidecar, simpler, Rust-based proxy) vs AWS App Mesh (native AWS integration, Envoy-based).",
+      "tools": [
+        "Circuit breakers (Resilience4j / Polly / Envoy)",
+        "Chaos Monkey / Gremlin / AWS FIS / Chaos Mesh",
+        "Route53 failover + Aurora Global Database",
+        "Consul service discovery",
+        "SRE practices + blameless post-mortems",
+        "Adaptive concurrency limiters"
+      ]
+    },
+    "hyper": {
+      "range": "99.999% SLO (26 sec downtime/month, 5.2 min/year) — the domain of payment networks, air traffic control, emergency services, tier-1 cloud provider infrastructure, and global platforms where any downtime makes international news",
+      "rec": "At this tier, every single component is redundant, every deploy is progressive, every failure mode is pre-tested, and recovery is measured in seconds. The architecture is fundamentally different from lower tiers — it's not an 'improved' version of active-passive; it's a different paradigm. (1) Active-active multi-region: all regions serve live read and write traffic simultaneously. No 'primary' — users are routed to their nearest region, and writes are accepted locally. This requires a globally distributed database (Google Spanner for strong consistency at ~10ms commit latency, CockroachDB for open-source alternative, DynamoDB Global Tables for AP-style eventual consistency) or a custom replication layer with well-defined conflict resolution. Trade-off: global strong consistency (Spanner) costs ~10ms per write; eventual consistency (DynamoDB GT) is faster but requires handling conflicts. (2) Cell architecture: the system is divided into cells, each serving 0.5–5% of users with a complete, independent stack (DB shard, cache, compute, queues — cells share NOTHING stateful). User-to-cell assignment via consistent hashing on user_id through a thin, highly-available cell router at the edge. A catastrophic failure in one cell (bad data, resource exhaustion, bad deploy) affects only that cell's users. Deploy new code to one cell first (canary cell), observe for 15+ minutes, then progressively roll to more cells. (3) Zero-downtime deploys with automated rollback: every deploy is a canary → progressive rollout with automated metric comparison. If the canary cell's error rate exceeds the baseline cell by >10%, or p99 latency exceeds baseline by >20%, an automated system rolls back within 60 seconds — no human in the loop. Tools: Spinnaker (Netflix, multi-cloud canary analysis with Kayenta), ArgoCD + Argo Rollouts (Kubernetes-native, supports canary + blue-green + experiments), Flagger (lightweight K8s canary controller). (4) Continuous chaos: not monthly drills — always-on, low-rate failure injection in production. Example configuration: every cell has 0.01% of requests experiencing 100ms latency injection, 0.001% experiencing 503 responses, and 1 random pod killed per hour. This continuously validates that circuit breakers, retries, and fallbacks are working. Any regression is caught within hours, not discovered during a real outage. (5) Automated runbooks for all known failure modes: encode every step of every runbook as executable code. When the monitoring system detects a known failure pattern (e.g., 'cache hit rate dropped below 80% in cell-7'), the automation system executes the remediation (e.g., 'restart cache nodes in cell-7, verify hit rate recovery within 5 minutes, page on-call if not recovered') without waiting for a human. The human is notified and can intervene, but recovery doesn't wait. Tools: PagerDuty Automation Actions, Rundeck (free OSS version), AWS Systems Manager Automation, or custom remediation bots. (6) Synthetic monitoring from every PoP: continuously run real user transactions (login, search, checkout, etc.) from 20+ geographic locations every 30 seconds. This detects regional issues (a specific PoP is slow, a specific CDN edge is failing) that aggregate metrics might miss. Tools: Datadog Synthetics ($5/test/month, 60+ locations), Checkly (developer-focused, Playwright-based, $7/test/month), Grafana Synthetic Monitoring (free tier, 5 probes). (7) Formal incident management: incident commander (single decision-maker during the event), communications lead (updates status page every 15 minutes, notifies stakeholders), scribe (records timeline for post-mortem), subject matter experts (rotate based on affected system). Use a dedicated Slack channel per incident with a bot that timestamps every action. Post-mortem within 48 hours — strictly blameless (analyze systems, not people). Google's post-mortem template: impact summary → timeline → root cause → contributing factors → lessons learned → action items with owners and deadlines.",
+      "tools": [
+        "Cell architecture",
+        "Active-active multi-region (Spanner/CockroachDB/DynamoDB GT)",
+        "Canary deploys (Spinnaker / Argo Rollouts)",
+        "Continuous chaos (Gremlin Enterprise / custom)",
+        "Automated remediation bots",
+        "Synthetic monitoring (Datadog / Checkly)",
+        "Custom health-check platform"
+      ]
+    }
+  },
+  "defined_terms": {
+    "MTTR": "Mean Time To Recovery — the average time between when a failure occurs and when service is fully restored. The most user-visible reliability metric.",
+    "MTTD": "Mean Time To Detect — the average time between when a failure occurs and when your team/system becomes aware. Often the largest component of MTTR.",
+    "MTBF": "Mean Time Between Failures — the average time between one failure and the next. Improving MTBF means failures happen less often.",
+    "RPO": "Recovery Point Objective — the maximum amount of data you can afford to lose in a disaster, expressed as time (e.g., RPO=1h means you can lose up to 1 hour of writes).",
+    "RTO": "Recovery Time Objective — the maximum time to restore service after a disaster. Drives your DR architecture: RTO=4h allows manual restore; RTO=1min requires automated failover.",
+    "SLO": "Service Level Objective — your internal target for reliability (e.g., 99.99% availability). More strict than your SLA; provides buffer.",
+    "SLA": "Service Level Agreement — the contractual commitment to customers. Breaching this has financial consequences (credits, penalties). Always set SLA looser than SLO.",
+    "SLI": "Service Level Indicator — the actual metric you measure to determine if you're meeting your SLO (e.g., 'percentage of requests completing successfully within 200ms').",
+    "error_budget": "The allowed unreliability implied by your SLO. A 99.9% SLO gives a 0.1% error budget per period. Spend it on fast deploys; freeze when depleted.",
+    "blast_radius": "The scope of impact when something fails. A well-architected system has small blast radii — a failure affects one cell, one region, or one feature, not everything.",
+    "split_brain": "A failure mode where two nodes both believe they are the primary and accept writes independently, creating divergent data. Prevented by consensus protocols (Raft, Paxos) or fencing tokens.",
+    "bulkhead": "An isolation pattern borrowed from ship design: separate thread pools, connection pools, or resource pools for different dependencies, so exhaustion of one doesn't affect others."
+  },
+  "children": [
+    {
+      "name": "Circuit Breakers",
+      "id": "rel-cb",
+      "icon": "⚡",
+      "phase": "Reliability",
+      "color": "#dc2626",
+      "sizes": [
+        "medium",
+        "large",
+        "hyper"
+      ],
+      "short": "Fail fast instead of cascading — the single most important reliability pattern in distributed systems",
+      "detail": {
+        "what": "A circuit breaker is a wrapper around any external call — HTTP request, database query, RPC, cache lookup, third-party API — that monitors the success/failure rate and automatically 'trips open' when failures exceed a threshold. The concept is directly borrowed from electrical engineering: an electrical circuit breaker detects excessive current (a short circuit) and opens the circuit to prevent the wiring from catching fire. A software circuit breaker detects excessive failures in a dependency and opens the circuit to prevent your service from cascading the failure. The breaker has three states: CLOSED (normal operation — requests flow through, failures are counted), OPEN (tripped — all requests fail immediately in <1ms without attempting the call, returning a fallback response), and HALF-OPEN (recovery probe — after a cooldown period, one request is allowed through to test if the dependency has recovered; if it succeeds, the breaker closes; if it fails, the breaker stays open for another cooldown cycle). The state machine is simple, but the impact is profound: it transforms an unbounded cascading failure (where a slow dependency can take down your entire system over minutes) into a bounded, contained degradation (where a failed dependency is detected in ~10 seconds and isolated, allowing the rest of your system to continue serving users with graceful fallbacks).",
+        "why": "Without circuit breakers, a slow downstream service is actually MORE dangerous than a dead one. If a dependency is completely dead, your requests fail fast (connection refused in <1ms) and you get an error immediately. But if a dependency is slow — responding in 30 seconds instead of 200ms — your service's threads (or connections, or goroutines) pile up waiting. Each waiting thread holds memory, a connection slot, and potentially a database connection. With 100 requests/second and a 30-second timeout, you accumulate 3,000 waiting threads within 30 seconds. Your thread pool exhausts. Your service can no longer handle ANY requests — including the 90% of requests that don't even involve the slow dependency. Your service's callers now see YOUR service as slow, and their threads pile up too. The entire system cascades into failure like dominoes. This is the single most common failure mode in microservices architectures — it's not hypothetical; it happens at every company with more than 5 services, usually within the first year. Circuit breakers prevent this by detecting the failure pattern early (within ~10 seconds) and immediately failing all subsequent calls without waiting — freeing threads, connections, and resources to serve healthy traffic. With a circuit breaker, a failed dependency costs you ~10 seconds of degraded responses; without one, it costs you a total system outage. The 10-second degradation might not even be visible to users if you have good fallbacks (cached data, default responses, feature flags that disable the affected feature).",
+        "numbers": "Standard configuration that works for most services: trip threshold = 50% failure rate over a 10-second sliding window with a minimum of 20 requests (the minimum prevents false positives from low-traffic endpoints where 1 failure out of 2 requests would be '50%'). Half-open probe interval: 1 request every 5–10 seconds. Close condition: 5 consecutive successful probes. Timeout setting: the 95th percentile of the dependency's healthy latency × 1.5 (e.g., if the dependency normally responds in 50ms at p95, set timeout to 75ms — anything beyond that is abnormal and should be treated as a failure). Effect: a dependency that goes 100% bad causes ~10 seconds of elevated error rate (while the failure count accumulates to the threshold), then the breaker opens and all subsequent calls fail in <1ms with fallback responses. Total user impact: ~10 seconds of degradation instead of unbounded cascading failure. Memory overhead of a circuit breaker: negligible (<1KB per breaker instance for the sliding window counters). Latency overhead when closed (normal operation): <0.1ms (just a counter increment). There is essentially no reason not to have a circuit breaker on every external call."
+      },
+      "tradeoffs": [
+        {
+          "axis": "Availability vs Correctness",
+          "left": "Fallback data (cached, default, degraded) keeps users functional but may be stale or incomplete — 'recommendations unavailable, showing trending' is better than a 503",
+          "right": "Real data from the dependency is always correct and fresh — but waiting for a dead dependency means nobody gets anything",
+          "pos": 0.5
+        }
+      ],
+      "stateTransitions": [
+        {
+          "from": "CLOSED",
+          "to": "OPEN",
+          "condition": "Failure rate exceeds threshold (e.g., >50% over 10s window with ≥20 requests)",
+          "userImpact": "Subsequent requests get fallback responses instead of real data — partial degradation"
+        },
+        {
+          "from": "OPEN",
+          "to": "HALF_OPEN",
+          "condition": "Cooldown period expires (e.g., 30 seconds)",
+          "userImpact": "One probe request tests the dependency — if it succeeds, traffic starts flowing again"
+        },
+        {
+          "from": "HALF_OPEN",
+          "to": "CLOSED",
+          "condition": "N consecutive probe successes (e.g., 5)",
+          "userImpact": "Full service restored — all requests flow to the dependency normally"
+        },
+        {
+          "from": "HALF_OPEN",
+          "to": "OPEN",
+          "condition": "Probe request fails",
+          "userImpact": "Breaker stays open, another cooldown cycle — fallbacks continue"
+        }
+      ],
+      "pitfalls": [
+        {
+          "name": "No fallback when breaker opens — a circuit breaker without a fallback is half-built",
+          "desc": "The breaker opens, calls fail instantly with a 'circuit open' exception. Your service dutifully returns this as a 500 error to the user. Now instead of slowness, users get explicit error pages — arguably worse UX. Every circuit breaker MUST have a defined fallback strategy, and the fallback should be designed per-dependency: (1) Cached data — serve the last known good response from cache, even if stale. For recommendations, product listings, user profiles — stale data is almost always better than no data. (2) Default value — return a sensible default. Search returns 'no results' instead of an error. Feature flags return the default variant. (3) Graceful degradation — disable the non-critical feature entirely. 'Recommendations unavailable, showing trending' or 'Reviews temporarily unavailable.' The product still works, just with fewer features. (4) Queued retry — for writes (sending an email, processing a webhook), queue the operation and retry when the dependency recovers. The fallback strategy should be documented per-dependency in a 'fallback catalog' that each team maintains."
+        },
+        {
+          "name": "Breaker per-instance instead of per-dependency — inconsistent failure handling",
+          "desc": "Each replica of your service runs its own circuit breaker instance. Replica A trips its breaker (it happened to send requests during the failure window), but replicas B and C haven't tripped yet. The downstream sees an inconsistent 60% drop in traffic (not a clean cutoff), and your users get different behavior depending on which replica handles their request — some get fallbacks, others get timeouts. Solutions: (1) Service mesh (Istio, Linkerd, Envoy) enforces circuit breaking at the network level across all replicas — the mesh maintains shared failure state. (2) Shared state (Redis) for breaker state — all replicas read from the same counters. (3) Accept per-instance breakers but tune the threshold so ALL replicas trip within a few seconds of each other (aggressive threshold + high request rate achieves this naturally). Service mesh is the cleanest solution because it requires no application code changes."
+        },
+        {
+          "name": "Timeout longer than the caller's budget",
+          "desc": "Your API has a 1-second SLO. Your database call has a 5-second timeout. Your downstream service call has a 10-second timeout. The user gave up after 1 second and closed the browser, but your server is still faithfully waiting for the DB and downstream — holding a thread, a connection, and memory for 10 seconds on a request that nobody wants the result of anymore. Set timeouts based on the caller's latency budget, not the callee's maximum capability. If your API's p99 target is 1 second and the gateway takes 100ms, you have 900ms for everything. Split that budget: 300ms for the DB, 300ms for the downstream, 300ms for local computation. Any component that exceeds its budget should be treated as a failure, triggering the circuit breaker."
+        },
+        {
+          "name": "Testing circuit breakers only in production — the hard way",
+          "desc": "You added Resilience4j to every service call and feel confident. But you've never actually triggered a breaker in a test environment to verify: Does the fallback work? Does the UI handle the fallback response correctly? Does the breaker actually trip at the configured threshold? Does it recover when the dependency comes back? Add integration tests that explicitly inject failures to trigger breakers and verify fallback behavior. Use chaos engineering tools (Toxiproxy for local development, Gremlin for staging) to simulate dependency failures in your CI pipeline. The first time you see a circuit breaker trip should be in a test, not in production."
+        }
+      ],
+      "examples": [
+        {
+          "name": "Netflix Hystrix — the origin of the pattern at web scale",
+          "desc": "Netflix built Hystrix in 2011 after experiencing cascading failures across their ~700 microservices. Each service had dozens of circuit breakers wrapping every dependency. The Hystrix Dashboard became iconic — a real-time visualization showing the health of every dependency with color-coded circles (green = healthy, yellow = degrading, red = open breaker) and traffic flow. At its peak, Netflix had thousands of Hystrix breaker instances across their fleet, collectively preventing hundreds of potential cascading failures per day. Hystrix was open-sourced and became the industry standard, but Netflix deprecated it in 2018 because the pattern had been absorbed into service meshes (Envoy sidecar) and newer libraries (Resilience4j) with better thread models. Resilience4j is the direct spiritual successor — lighter weight, designed for Java 8+ functional style, and actively maintained. The Hystrix-era lesson that endures: circuit breakers are not optional in microservices; they are as fundamental as error handling."
+        },
+        {
+          "name": "Amazon's 2018 AZ isolation — 'one-AZ outage stays one AZ'",
+          "desc": "In AWS's early days, a failure in one Availability Zone could cascade to other AZs within the same region because internal services made cross-AZ calls without proper circuit breaking or bulkheading. A bad AZ would slow down cross-AZ API calls, which would cause thread exhaustion in healthy AZs, which would cascade into a full-region outage — the very thing AZs were supposed to prevent. AWS re-architected their internal services with strict circuit breaking and bulkheading between AZs: each AZ's dependencies are isolated with independent circuit breakers, thread pools (bulkheads), and health-aware routing. A degraded AZ now 'stays bad' without contaminating others. This is visible to customers: AWS incidents are now more commonly reported as 'partial' (one AZ affected, others healthy) rather than full-region. The lesson: redundancy (multi-AZ) without isolation (circuit breakers + bulkheads) is incomplete — the failure can propagate through the redundancy."
+        },
+        {
+          "name": "Envoy's built-in outlier detection — circuit breaking without code changes",
+          "desc": "Envoy proxy (the de facto standard sidecar in service meshes like Istio and App Mesh) provides circuit breaking at the network level via 'outlier detection.' When Envoy observes that a specific upstream host returns >5 consecutive 5xx errors, it ejects that host from the load balancing pool for 30 seconds (configurable). No application code changes required — Envoy sits in the network path and makes the decision automatically. This means you can add circuit breaking to an entire microservices fleet by deploying Envoy sidecars, even if the application code has no resilience logic. Configuration: consecutive_5xx: 5, interval: 10s, base_ejection_time: 30s, max_ejection_percent: 50% (never eject more than half the hosts to prevent amplifying the problem). This is the lowest-effort path to circuit breaking at the 'large' and 'hyper' tiers."
+        }
+      ],
+      "sizes_cfg": {
+        "medium": {
+          "range": "2+ service dependencies — you now have enough inter-service calls that a cascading failure is possible",
+          "rec": "Add a circuit breaker on every external call — HTTP to other services, database queries with timeouts, third-party API calls, cache lookups. At this scale, application-level libraries are the right approach (simpler than a service mesh). Choose by language: Resilience4j (Java/Kotlin — the most mature and feature-rich: circuit breaker + rate limiter + retry + bulkhead + time limiter in one library, ~100KB, zero dependencies), Polly (.NET — Microsoft-recommended, fluent API, excellent documentation), opossum (Node.js — lightweight, Promise-based, good TypeScript support), or gobreaker (Go — simple, well-tested). For each breaker, define the fallback: what does the user see when this dependency is down? Document this in a table per service. Configure: 50% failure rate threshold, 10-second window, 20-request minimum, 30-second open duration, 5 probes to close. Add a Grafana/Datadog dashboard showing breaker state (closed/open/half-open) per dependency — this becomes your reliability dashboard.",
+          "tools": [
+            "Resilience4j (Java/Kotlin)",
+            "Polly (.NET)",
+            "opossum (Node.js)",
+            "gobreaker (Go)",
+            "Envoy upstream health checks"
+          ]
+        },
+        "large": {
+          "range": "10+ services — too many circuit breakers to manage in application code alone",
+          "rec": "Move circuit breaking to the service mesh layer so it's enforced uniformly across all services without per-service code changes. Istio (most feature-rich service mesh: mTLS, traffic management, circuit breaking, observability — but heavy: ~100MB memory per Envoy sidecar, significant control plane resources; best for organizations with K8s expertise and 50+ services), Linkerd (lightest service mesh: Rust-based proxy at ~10MB per sidecar, simpler operational model, fewer features than Istio but covers 80% of needs; best for teams that want mesh benefits without Istio's complexity), or AWS App Mesh (native AWS integration, Envoy-based, easier setup for AWS-native shops; fewer features than Istio). Each team maintains a fallback catalog for their service's dependencies — reviewed quarterly. Per-service SLO budgets: track each dependency's error budget independently. When a dependency's budget is depleted, the breaker configuration should become more aggressive (lower threshold, faster trip) to protect callers.",
+          "tools": [
+            "Istio",
+            "Linkerd",
+            "Envoy",
+            "AWS App Mesh",
+            "fallback catalog per service"
+          ]
+        },
+        "hyper": {
+          "range": "500+ services — circuit breaking must be automated, intelligent, and zero-touch",
+          "rec": "Automated circuit breaking by service mesh with ML-enhanced anomaly detection. Envoy's outlier detection handles the common cases (consecutive 5xx, latency outliers), but at this scale you also need: (1) Adaptive thresholds — a static '50% failure rate' threshold doesn't work when some services have 0.001% baseline error rate and others have 2%. ML models learn each dependency's normal behavior and detect anomalies relative to its baseline. (2) Automatic fallback routing — when a breaker opens, traffic is automatically routed to a healthy replica in another cell/region rather than returning a degraded response. The user never sees degradation. (3) Predictive circuit breaking — if a dependency's latency is trending upward (e.g., p99 went from 50ms → 100ms → 200ms over the last 5 minutes), open the breaker proactively BEFORE it causes failures, and route traffic to a healthy replica. This prevents the degradation from ever being user-visible. (4) Breaker telemetry pipeline — all breaker state changes (trip, close, half-open) are emitted as events to a central analytics system, enabling fleet-wide reliability dashboards and trend analysis.",
+          "tools": [
+            "Envoy with Outlier Detection",
+            "custom ML anomaly detection",
+            "automated traffic shifting",
+            "predictive breaker systems"
+          ]
+        }
+      },
+      "levelUp": [
+        {
+          "from": "medium",
+          "to": "large",
+          "trigger": ">10 services or managing per-service breaker configuration becomes a burden",
+          "action": "Migrate circuit breaking from application libraries to a service mesh (Istio or Linkerd). This centralizes configuration, provides uniform behavior across all languages/services, and adds mTLS, observability, and traffic management as bonuses. Start by deploying the mesh sidecar alongside existing application-level breakers (defense in depth), then gradually remove application-level breakers as you gain confidence in the mesh."
+        },
+        {
+          "from": "large",
+          "to": "hyper",
+          "trigger": "Static breaker thresholds cause false positives (tripping during normal variance) or false negatives (not tripping during slow degradation)",
+          "action": "Implement ML-based adaptive thresholds that learn each dependency's baseline and detect anomalies relative to that baseline. Add predictive circuit breaking that trips based on latency trends before failures actually occur. Add automatic failover routing so open breakers route to healthy replicas instead of returning fallbacks."
+        }
+      ],
+      "children": []
+    }
+  ]
+}

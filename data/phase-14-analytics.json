@@ -1,0 +1,289 @@
+{
+  "name": "Phase 14 · Analytics & Data",
+  "id": "analytics",
+  "icon": "📊",
+  "phase": "Analytics",
+  "color": "#d97706",
+  "sizes": [
+    "small",
+    "medium",
+    "large",
+    "hyper"
+  ],
+  "short": "OLAP vs OLTP — the quiet separation that prevents your production database from dying under dashboard queries",
+  "keyInsight": "Your production database is a Formula 1 car optimized for single-row speed. Analytical queries ask it to haul freight. Those are different vehicles. Build a warehouse before your analyst's GROUP BY query brings down production during a board meeting.",
+  "mentalModel": "Imagine your production database is a restaurant kitchen during dinner rush. Every request is a customer order — the kitchen is optimized to prepare individual meals quickly. An analytical query is like someone walking in and asking 'Can you count every meal you've made this year, broken down by ingredient, season, and customer age group?' The kitchen grinds to a halt while everyone stops cooking to answer the census question. The data warehouse is a separate research facility where that census can happen all day without affecting dinner service. OLTP is the kitchen; OLAP is the research lab. Separate them.",
+  "detail": {
+    "what": "There are two fundamentally different types of database workloads, and conflating them is one of the most common causes of mysterious production slowdowns. OLTP (Online Transactional Processing) is what your application does: 'fetch user 42's profile,' 'add item to cart,' 'update order status to shipped.' These are fast, small, indexed operations — touching 1–100 rows at a time, completing in 1–50ms, occurring thousands of times per second. Your primary database (Postgres, MySQL, DynamoDB) is optimized for this: B-tree indexes, row-oriented storage, buffer pools that cache hot rows. OLAP (Online Analytical Processing) is what your business needs: 'total revenue by product category by month for the last 3 years,' 'customer retention cohort analysis,' 'average order value by acquisition channel by geography.' These are massive, scan-heavy operations — reading millions or billions of rows, aggregating across many columns, taking seconds to minutes. Column-oriented databases (BigQuery, Snowflake, Redshift, ClickHouse) are optimized for this: columnar storage reads only the columns needed (so a 50-column table with a query on 3 columns reads 6% of the data), compression works brilliantly on columnar data (10–100× compression ratios), and massively parallel query engines (BigQuery spins up thousands of workers per query) crunch through terabytes in seconds. The analytics stack consists of: (1) ETL/ELT pipeline — extracting data from your production databases and loading it into the warehouse. Methods range from simple nightly SQL exports to real-time Change Data Capture (CDC) streams. (2) Data warehouse — the columnar store where analysis happens. (3) Transformation layer — dbt (data build tool) has become the standard for defining SQL-based transformations that turn raw exported data into clean analytical models. (4) BI/visualization tools — Metabase, Looker, Tableau, or custom dashboards that let business users query the warehouse without writing SQL. (5) Data quality/observability — tools that verify the data pipeline is healthy (freshness checks, schema validation, anomaly detection).",
+    "why": "Running OLAP queries against your OLTP database is a ticking time bomb. It works at small scale (when your biggest table has 100K rows, even a full scan takes <1 second), which is precisely why teams don't separate early. Then the company grows. One day, the finance team's dashboard — which runs a 6-table JOIN with 3 nested CTEs across 100 million rows every 15 minutes — saturates your database's disk I/O for 45 seconds. During those 45 seconds, your application's p99 latency goes from 50ms to 5 seconds. Users see spinning loaders. Some transactions time out. If this happens during peak traffic, you might get an outage. The worst part: the analyst doesn't even know they caused it, and the on-call engineer sees 'database I/O saturation' without realizing it's a BI query, not application traffic. Separation is also about speed: column-oriented analytical stores process aggregation queries 10–100× faster than row stores. That 30-second Postgres query runs in 1 second on BigQuery — not because BigQuery has a magic algorithm, but because columnar storage + compression + parallel execution is the right architecture for scan-heavy workloads, while B-tree indexes + row storage is the right architecture for point lookups. Use each for what it's good at. Beyond performance, separation enables: (a) different scaling — your analytical workload can grow 10× without affecting production; (b) different access control — analysts get read access to the warehouse, never to production; (c) different data modeling — the warehouse can have denormalized, analyst-friendly schemas optimized for querying, while production stays normalized for write efficiency.",
+    "numbers": "Performance gap quantified: an aggregation query (SUM, GROUP BY, window functions) over 100M rows: Postgres ~30s (full table scan, single-threaded), BigQuery ~1–3s (columnar, distributed, parallel), Snowflake ~1–5s, ClickHouse ~0.5–2s (especially fast for time-series aggregations). At 1B rows: Postgres may OOM or take 10+ minutes; BigQuery/Snowflake still finish in 5–30s and scale linearly to petabytes. Storage costs: production DB (RDS Postgres) ~$0.115/GB/month; BigQuery ~$0.02/GB/month (20TB free); Snowflake ~$0.023/GB/month (compressed); ClickHouse self-hosted on commodity hardware even cheaper. ETL latency tiers: nightly batch export (pg_dump, custom scripts) = 24h staleness — fine for most BI dashboards and board reports; CDC with Debezium + Kafka = 1–5 minute staleness — needed for operational dashboards (customer support, live inventory); streaming with Kafka + Flink = sub-second staleness — needed for real-time analytics (fraud detection, live recommendations, trading). Each tier costs significantly more in complexity and infrastructure: batch is near-free, CDC requires Kafka + Debezium operation, streaming requires a dedicated stream processing team. Pick the slowest tier that meets your business needs."
+  },
+  "decisionFramework": {
+    "question": "When and how should I separate analytical from transactional workloads?",
+    "factors": [
+      "Largest table row count",
+      "Complexity of analytical queries",
+      "Frequency of analytical queries",
+      "Staleness tolerance for dashboards",
+      "Team size and data literacy"
+    ],
+    "matrix": [
+      {
+        "scenario": "<1M rows in largest table, simple queries, weekly reports",
+        "answer": "Don't separate. Run analytics directly on a read replica during off-peak hours. Use Metabase or Redash connected to the replica."
+      },
+      {
+        "scenario": "1M–100M rows, complex aggregations, daily dashboards",
+        "answer": "Export to BigQuery/Snowflake nightly. Use dbt for transformations. This is the sweet spot — simple pipeline, 10–100× faster queries, complete isolation from production."
+      },
+      {
+        "scenario": "100M+ rows, near-real-time dashboards, dedicated data team",
+        "answer": "CDC pipeline (Debezium → Kafka → warehouse). Data warehouse with dbt transformations. Data quality monitoring. Data catalog for discovery. This is the 'proper' data stack."
+      },
+      {
+        "scenario": "Billions of rows, real-time analytics, ML features derived from events",
+        "answer": "Data lake (S3/GCS + Parquet/Iceberg) + lakehouse (Databricks/Trino). Stream processing (Flink) for real-time. Feature store for ML. Data mesh for domain ownership."
+      }
+    ]
+  },
+  "tradeoffs": [
+    {
+      "axis": "OLAP vs OLTP",
+      "left": "Analytical column store: 10–100× faster for aggregations, cheap storage, but slow for single-row lookups and writes",
+      "right": "Transactional row store: fast for single-row CRUD, strong consistency, ACID transactions — but melts under full-table scans",
+      "pos": 0.5
+    },
+    {
+      "axis": "Realtime vs Batch analytics",
+      "left": "Streaming (Kafka + Flink): sub-second freshness, see events as they happen — but complex to build, debug, and operate; at least 2–3 engineers to maintain",
+      "right": "Batch ETL (nightly export + dbt): simple to build and debug, SQL-based, most teams can maintain it — but 24h data staleness, which is fine for 90% of analytics use cases",
+      "pos": 0.4
+    },
+    {
+      "axis": "Managed warehouse vs Self-hosted",
+      "left": "BigQuery/Snowflake: zero operational burden, pay-per-query or pay-per-compute, automatic scaling, built-in security — but expensive at high query volume and potential vendor lock-in",
+      "right": "ClickHouse/Trino self-hosted: much cheaper at scale (10× less at petabyte level), full control, portable — but requires a data engineering team to operate (at least 1–2 FTE)",
+      "pos": 0.5
+    }
+  ],
+  "pitfalls": [
+    {
+      "name": "Running BI queries against the production DB — the slow-motion production incident",
+      "desc": "It starts innocently: the founder connects Metabase directly to the production Postgres to check daily revenue. Works fine at 10K rows. Six months later, the finance team has 15 dashboards refreshing every 15 minutes, each running multi-table JOINs across 50M rows. Your production p99 latency now has a mysterious 30-second spike every 15 minutes that correlates perfectly with dashboard refreshes but nobody has connected the dots. The fix is architecturally simple: never point BI tools at production. At minimum, use a read replica (but this still shares disk I/O on Aurora/RDS); ideally, export to a dedicated analytical store. The rule: past 1M rows in any table or any aggregation query running >1s, separate OLAP from OLTP — no exceptions."
+    },
+    {
+      "name": "ETL that breaks silently — stale dashboards that nobody notices",
+      "desc": "Your nightly Airflow DAG exports data to BigQuery. On Tuesday it fails because someone added a new column to the production table that broke the export query. Wednesday, Thursday, Friday — the dashboards still show data, but it's Tuesday's data. The finance team reports numbers to the board on Friday using 3-day-stale data. Nobody notices until Monday. The fix: data freshness monitoring. Add a 'last_updated_at' column to every warehouse table. Build an alert (in Airflow, or using Great Expectations, or even a simple cron job) that fires when any critical table is older than its expected refresh cadence (e.g., 'revenue_daily should be <24h old'). Treat data pipeline failures like production outages — they affect business decisions."
+    },
+    {
+      "name": "Schema drift between production and warehouse",
+      "desc": "A developer adds a 'middle_name' column to the users table in production on Tuesday. The nightly export job expects a fixed set of columns. It encounters the unexpected column and either fails (best case) or silently drops it (worst case). Downstream dbt models that depend on the users table break. The fix: use schema-aware CDC. Debezium (open-source CDC by Red Hat) captures every change to the production database schema and data, publishing them to Kafka topics. Schema Registry (Confluent or Apicurio) enforces forward and backward compatibility. Alternatively, use contract tests on your export — a CI job that compares the production schema against what the pipeline expects and alerts on mismatch before the pipeline breaks."
+    },
+    {
+      "name": "PII leaking into the warehouse — a compliance nightmare hiding in plain sight",
+      "desc": "Production has GDPR controls: PII is encrypted, access is logged, deletion requests are honored within 30 days. But the warehouse has a raw copy of the same data with no such controls — PII is in plaintext, analysts have broad access, and nobody thought to propagate deletion requests. When a user exercises their right to erasure, you delete from production but their data lives on in the warehouse, in 6 months of weekly snapshots, in the data lake, and in the ML training dataset. The fix: apply the same data protection controls to the warehouse as to production. Tokenize PII at the export boundary (replace real names/emails with tokens; keep the mapping in a vault). Propagate deletion events to all downstream systems. Use column-level masking in your warehouse (Snowflake and BigQuery both support this natively) so analysts see 'j***@example.com' unless they have specific PII access rights."
+    },
+    {
+      "name": "Complex business logic in dbt models with no tests — wrong numbers nobody catches",
+      "desc": "Your dbt project has a 'revenue' model that joins orders, refunds, partial credits, currency conversions, and tax exemptions across 6 CTEs. There's a subtle bug: refunds issued more than 30 days after purchase are double-counted due to a JOIN condition error. Six months of board reports, investor updates, and compensation targets were calculated from wrong revenue numbers. The fix: treat dbt models like production code. Use dbt's built-in tests (assert unique, assert not_null, assert relationships) on every model. Use dbt expectations or Great Expectations for advanced assertions (row count within ±10% of yesterday, revenue is always positive, no future dates). For critical financial models: reconcile the warehouse revenue number against the production number monthly — they should match within rounding tolerance. If they don't, you have a bug."
+    },
+    {
+      "name": "Building a data lake before you need one — complexity for complexity's sake",
+      "desc": "You have 50GB of data and 2 analysts. You decide to build a 'proper data platform' with S3 + Parquet + Iceberg + Trino + Airflow + dbt + Great Expectations + a data catalog. Six months later, you have a beautifully architected data platform that 2 analysts use to run 3 queries a day — queries that would have been perfectly served by BigQuery with a simple nightly export. The complexity cost: 2 engineers maintaining the platform, 3 weeks to onboard a new analyst, and fragile pipelines that break monthly. The rule: use the simplest tool that works. Postgres read replica → BigQuery nightly export → dbt → Metabase gets you incredibly far. Add complexity only when you've genuinely outgrown the simpler approach."
+    }
+  ],
+  "examples": [
+    {
+      "name": "Airbnb's data warehouse evolution — each tier earned the hard way",
+      "desc": "Airbnb's analytics journey mirrors what most companies experience, just at compressed speed. Stage 1: MySQL replicas with analysts writing SQL directly (adequate for early startup). Stage 2: migrated to Amazon Redshift when queries became too slow — basic ETL scripts, not yet sophisticated. Stage 3: as data volume grew to petabytes, moved to a data lake on S3 with Apache Spark for heavy processing and Presto (now Trino) for interactive SQL queries. Stage 4: invested in data quality heavily after several incidents where bad data led to wrong business decisions — built Airbnb's data quality initiative and contributed to the open-source ecosystem. Each transition was driven by hitting a concrete wall on the previous approach, not by theoretical architecture desire. The lesson: let your data volume and query patterns drive your architecture evolution, not blog posts about what other companies use."
+    },
+    {
+      "name": "Stitch Fix's data as core product — analytics is not a cost center",
+      "desc": "Stitch Fix's entire business model is data-driven personal styling. Their data warehouse feeds ML models that recommend clothing to customers. The investment in data infrastructure (warehouse, feature store, ML pipeline) directly enables the core product — it's not a 'nice-to-have' reporting layer, it's the engine that makes the company work. Their data team is proportionally one of the largest in tech. This demonstrates the highest maturity of analytics thinking: data infrastructure as the input to the most valuable features. If your product has any personalization, recommendation, pricing optimization, or fraud detection, the data warehouse isn't a cost center — it's the foundation of your competitive advantage."
+    },
+    {
+      "name": "GitLab's transparent data stack — the dbt + Snowflake standard",
+      "desc": "GitLab runs their entire analytics on a publicly documented stack: Stitch (ELT tool) extracts from production into Snowflake, dbt transforms raw data into analytical models, and Sisense (now part of Periscope) provides dashboards. Their entire dbt project is open-source in their handbook. This has become the de facto 'modern data stack' pattern adopted by thousands of companies. The specific tools don't matter as much as the pattern: extract → load → transform (ELT, not ETL) → visualize, with each layer clearly separated and independently testable."
+    }
+  ],
+  "commercialLandscape": {
+    "title": "Analytics & Data Technology Comparison",
+    "categories": [
+      {
+        "name": "Data Warehouses",
+        "entries": [
+          {
+            "name": "Google BigQuery",
+            "strengths": "Serverless (zero infrastructure management), automatic scaling from KB to PB, pay-per-query pricing ideal for sporadic usage ($5/TB scanned, first 1TB/month free), built-in ML (BigQuery ML lets you train models in SQL), excellent geospatial support, generous free tier (10GB storage + 1TB queries/month free), seamless integration with Google ecosystem",
+            "weaknesses": "Query costs unpredictable at scale (a badly written query can scan TB and cost hundreds), no indexes (everything is a full scan, optimized by partitioning and clustering), cold start latency on small queries (~2s minimum), egress charges for large result sets, slot-based pricing needed for predictable costs at scale, less mature ecosystem than Snowflake for data sharing",
+            "cost": "$0.02/GB/month storage. $5/TB queried (on-demand). Flat-rate: $2,000/month for 100 slots. Free tier: 10GB + 1TB/month",
+            "bestFor": "Teams wanting zero-ops analytics, Google Cloud shops, sporadic analytical workloads, ML-in-SQL use cases."
+          },
+          {
+            "name": "Snowflake",
+            "strengths": "Separation of compute and storage (scale independently, pay independently), virtual warehouses let different teams/workloads have dedicated compute without interference, data sharing across organizations without copying data, time travel (query data as of any point in the last 90 days — incredible for debugging), near-zero maintenance, excellent dbt integration, strong ecosystem for data apps",
+            "weaknesses": "Expensive at high continuous compute usage (warehouses running 24/7 at large sizes), complex credit-based pricing model makes cost prediction difficult (credits vary by cloud provider and region), vendor lock-in (proprietary format), cold warehouse startup takes 1–5 minutes, query performance highly dependent on warehouse sizing choice",
+            "cost": "Storage: $0.023/GB/month (compressed). Compute: $2–4/credit/hour depending on size. Typical small team: $200–500/month. Typical medium team: $2K–20K/month",
+            "bestFor": "Teams wanting best-in-class SQL analytics with data sharing, organizations with variable analytical workloads (warehouses auto-suspend when idle), companies needing time travel for auditing."
+          },
+          {
+            "name": "ClickHouse",
+            "strengths": "Blazingly fast for time-series and log analytics (10–100× faster than Postgres for aggregation, often 2–5× faster than BigQuery for column scans), open-source self-hostable (massive cost savings at scale), excellent compression (5–10× on typical data), real-time ingestion (not batch — data is queryable within seconds of insertion), MergeTree engine handles append-heavy workloads beautifully",
+            "weaknesses": "Operational complexity when self-hosted (replication, sharding, cluster management), not great for point lookups or small queries (optimized for scans), UPDATE/DELETE is expensive (MergeTree is append-optimized — updates are rewritten), JOIN performance is limited compared to traditional warehouses, smaller ecosystem than Snowflake/BigQuery (fewer integrations, less dbt support historically though improving)",
+            "cost": "Self-hosted: free + hardware (~$500/month for a capable 3-node cluster). ClickHouse Cloud: from $197/month (basic), scales with usage",
+            "bestFor": "Teams with time-series or log analytics, high-volume real-time analytics (ad tech, gaming, observability), cost-sensitive organizations willing to self-host."
+          },
+          {
+            "name": "Amazon Redshift",
+            "strengths": "Deep AWS integration (S3, Glue, SageMaker, QuickSight), Redshift Serverless option (auto-scaling, pay-per-query like BigQuery), mature and well-understood, AQUA acceleration layer for I/O-heavy queries, Redshift Spectrum queries data directly in S3 without loading",
+            "weaknesses": "Cluster management is complex for provisioned mode (node types, distribution keys, sort keys), vacuuming required (like Postgres), slower than Snowflake/BigQuery for ad-hoc queries without careful optimization, resize operations are slow, not truly separated compute/storage in provisioned mode",
+            "cost": "Provisioned: from $0.25/hour (dc2.large). Serverless: $0.375/RPU-hour. Typical: $200–5,000/month depending on size",
+            "bestFor": "AWS-native teams with existing Redshift investment, teams wanting Redshift Spectrum to query S3 data lake directly."
+          }
+        ]
+      },
+      {
+        "name": "ETL/ELT & Data Integration",
+        "entries": [
+          {
+            "name": "dbt (data build tool)",
+            "strengths": "The industry standard for SQL-based data transformation, version-controlled models (SQL in Git), built-in testing framework (unique, not_null, relationships, custom), documentation auto-generated from models, incremental models (process only new data — critical at scale), Jinja templating for DRY SQL, massive community with thousands of packages (dbt Hub), supports all major warehouses",
+            "weaknesses": "SQL-only (complex transformations requiring Python need dbt-python which is less mature), steep learning curve for Jinja macros, project structure can become complex at scale, dbt Cloud is expensive, testing is rudimentary compared to Python testing frameworks, slow on very large incremental models without careful optimization",
+            "cost": "dbt Core: free (open source). dbt Cloud Developer: free (1 seat). Team: $100/seat/month. Enterprise: custom",
+            "bestFor": "Every data team. Seriously — dbt has become the standard transformation layer. Use dbt Core (free) if cost-sensitive, dbt Cloud if you want managed scheduling and IDE."
+          },
+          {
+            "name": "Debezium (CDC)",
+            "strengths": "Open-source Change Data Capture — captures every INSERT, UPDATE, DELETE from your production DB (Postgres, MySQL, MongoDB, SQL Server) and publishes as events to Kafka. Near-real-time (sub-second lag typically). Captures schema changes. Exactly-once semantics with Kafka Connect. No impact on production DB performance (reads the write-ahead log, not the tables). The gold standard for CDC.",
+            "weaknesses": "Requires Kafka infrastructure (adds operational complexity), connector configuration can be finicky, handling schema evolution requires Schema Registry, initial snapshot of large tables can take hours and stress the DB, debugging CDC lag requires Kafka expertise",
+            "cost": "Free (open source). Managed via Confluent Cloud ($0.11/GB ingested) or Amazon MSK Connect",
+            "bestFor": "Any team needing near-real-time data synchronization from production to warehouse/search/cache. The industry standard for CDC."
+          },
+          {
+            "name": "Fivetran",
+            "strengths": "Managed ELT — 300+ pre-built connectors (Stripe, Salesforce, Google Ads, databases, SaaS APIs), zero-code setup (point and click), automatic schema drift handling, managed infrastructure (you never touch a server), incremental syncs, excellent Snowflake/BigQuery integration",
+            "weaknesses": "Expensive at scale ($1/MAR — monthly active row — adds up fast at millions of rows), limited customization for complex extractions, you're dependent on Fivetran maintaining connectors (if a SaaS API changes, you wait for Fivetran to update), black box (can't see exactly what queries it runs against your source)",
+            "cost": "Free tier: 500K MAR. Starter: $1/MAR/month. Standard: $1.50/MAR. Enterprise: custom. Typical mid-scale: $500–5,000/month",
+            "bestFor": "Teams wanting zero-maintenance data integration from SaaS sources. Excellent when you integrate many third-party data sources (CRM, ads, billing) and don't want to build connectors."
+          },
+          {
+            "name": "Airbyte",
+            "strengths": "Open-source alternative to Fivetran, 300+ connectors (many community-built), self-hostable (full control, no per-row pricing), growing fast, extensible (build custom connectors in Python), supports normalization, CDC connectors included",
+            "weaknesses": "Connector quality varies (community connectors less reliable than Fivetran's), self-hosted requires maintenance (Kubernetes or Docker Compose), UI is functional but not as polished, syncs can be slow for large volumes, some connectors have memory issues at scale",
+            "cost": "Self-hosted: free. Airbyte Cloud: from $1/credit (varies by connector). Typical: $0–2,000/month",
+            "bestFor": "Cost-sensitive teams, those wanting open-source control, teams needing custom connectors."
+          },
+          {
+            "name": "Apache Airflow",
+            "strengths": "The standard for data pipeline orchestration — define DAGs (directed acyclic graphs) in Python, schedule jobs, handle dependencies, retry failures, alert on SLA misses. Massive ecosystem of operators (Spark, BigQuery, dbt, S3, Kubernetes). Extensible. MWAA (AWS Managed Airflow) reduces operational burden. Battle-tested at scale (used by Airbnb, Google, hundreds of companies).",
+            "weaknesses": "Steep learning curve (DAG authoring in Python, understanding executors and connections), scheduler can become a bottleneck at >500 DAGs, UI is functional but dated, task-level debugging is painful, cold start for new workers can delay execution, MWAA is expensive ($0.49/environment/hour = $360/month just for the environment, before worker costs)",
+            "cost": "Self-hosted: free + compute. MWAA: $360/month base + worker costs. Astronomer (managed): from $300/month. Google Cloud Composer: from $400/month",
+            "bestFor": "Teams with complex pipeline orchestration needs (dependencies, retries, SLA monitoring). The industry standard, despite its warts."
+          },
+          {
+            "name": "Dagster",
+            "strengths": "Modern alternative to Airflow — assets-first model (define what you want to produce, not how to run it), built-in data lineage, type checking, excellent local development experience, partitioning for incremental processing, integrated testing, beautiful UI showing asset dependency graphs and materialization history, software-engineering-friendly (feels like writing code, not config)",
+            "weaknesses": "Smaller community than Airflow (though growing fast), fewer pre-built integrations, managed offering (Dagster Cloud) is newer, migration from Airflow requires rewriting DAGs, less battle-tested at extreme scale",
+            "cost": "Open source: free. Dagster Cloud: from $0 (hobby) to $100/seat/month (Teams). Enterprise: custom",
+            "bestFor": "Teams starting fresh (not migrating from Airflow), data engineers who want a modern developer experience, teams valuing data lineage and testing."
+          }
+        ]
+      },
+      {
+        "name": "BI & Visualization",
+        "entries": [
+          {
+            "name": "Metabase",
+            "strengths": "Open-source, self-hostable, beautiful default visualizations, non-technical users can explore data without SQL (point-and-click query builder), embedded analytics (embed dashboards in your product), question-based interface is intuitive, generous free tier, excellent for 'democratizing data access'",
+            "weaknesses": "Limited for complex analytical workflows, slow on very large datasets without warehouse optimization, self-hosted requires maintenance, alerting is basic, no real data modeling layer (unlike Looker), free tier lacks some features (row-level permissions, SSO)",
+            "cost": "Self-hosted: free (open source). Metabase Cloud: $85/month (starter). Pro: $500/month. Enterprise: custom",
+            "bestFor": "Small to medium teams wanting easy, beautiful BI without a dedicated analyst. Excellent for product-embedded analytics."
+          },
+          {
+            "name": "Looker (Google)",
+            "strengths": "Powerful LookML modeling layer (define metrics once, use everywhere — prevents inconsistent metric definitions), excellent for large organizations where consistent metric definitions matter, deep BigQuery integration, embedded analytics, data actions (trigger workflows from dashboards), strong governance features",
+            "weaknesses": "Expensive ($3K–5K/month starting, $50K+/year for enterprise), steep LookML learning curve, slow query performance compared to modern tools (generates SQL that can be suboptimal), being absorbed into Google Cloud platform (uncertainty about standalone future), complex administration",
+            "cost": "Starts ~$3K/month. Enterprise: $50K–$150K+/year",
+            "bestFor": "Large organizations with a dedicated analytics team that needs consistent metric definitions across the company."
+          },
+          {
+            "name": "Apache Superset",
+            "strengths": "Open-source, feature-rich BI platform, supports every major database/warehouse, SQL IDE built in, rich visualization library, fine-grained security (row-level, dataset-level), active community, no per-user licensing cost, Preset offers managed hosting",
+            "weaknesses": "Setup and configuration is complex (especially authentication, caching, and async queries), performance issues with large dashboards, UI less polished than Metabase or Looker, caching configuration required for good performance, documentation has gaps",
+            "cost": "Self-hosted: free. Preset (managed): from $20/user/month",
+            "bestFor": "Technical teams wanting a powerful, free BI tool they control. Good for companies that want to avoid BI tool vendor lock-in."
+          }
+        ]
+      }
+    ]
+  },
+  "levelUp": [
+    {
+      "from": "small",
+      "to": "medium",
+      "trigger": "Any complex analytical query consistently taking >1 second, or analysts running queries during peak hours that affect production performance, or the CEO asks 'can we get a weekly revenue dashboard?' and you realize Postgres can't answer it quickly",
+      "action": "Separate your analytical workload from production. Here's the practical path: (1) If you just need a quick win, create a read replica of your production database and point all BI tools and analyst queries at the replica instead of production. This costs $50–200/month for a managed replica and immediately isolates production from analytical load. (2) For a proper separation, export to BigQuery or Snowflake. The simplest approach: write a daily cron job (or Airflow DAG) that runs pg_dump on specific tables and loads the results into BigQuery using bq load. BigQuery's free tier (1TB queries + 10GB storage/month) makes this essentially free for small datasets. (3) Connect Metabase (free, self-hosted) or Redash to your warehouse. Now analysts query the warehouse, not production. (4) Start using dbt (free, open source) even if you only have 3 models — it establishes the pattern of versioned, tested transformations that will scale with you. Time investment: 1–2 days for read replica approach, 1–2 weeks for full BigQuery + dbt setup."
+    },
+    {
+      "from": "medium",
+      "to": "large",
+      "trigger": ">10M rows in analytical tables (nightly exports start taking hours), or a dedicated BI/analytics team is forming (3+ analysts), or near-real-time dashboards are needed (customer support needs current data, not yesterday's)",
+      "action": "Build a proper data warehouse with a reliable pipeline. Here's how: (1) Set up Change Data Capture using Debezium: install the Debezium Postgres connector in Kafka Connect, configure it to capture changes from your critical tables. Changes flow to Kafka topics in near-real-time (<5 second lag). From Kafka, use a Snowflake Kafka Connector or BigQuery's Kafka sink to load into your warehouse. This replaces the fragile nightly cron job with a resilient, near-real-time stream. (2) Implement dbt as your transformation layer: organize raw data (straight from CDC) into staging models (cleaned, typed) and then into marts (business-friendly aggregations). Use dbt tests on every model. Run dbt on a schedule (Airflow or dbt Cloud). (3) Add data quality monitoring: Great Expectations (open source) or Elementary (dbt-native) to assert data freshness, volume, schema, and value distributions. Alert on anomalies. (4) Create a data catalog: Amundsen (open source, by Lyft), DataHub (by LinkedIn), or OpenMetadata so analysts can discover what data exists and who owns it. (5) Implement data access controls: column-level masking for PII in the warehouse, role-based access so analysts see only what they need. Time investment: 4–8 weeks for full pipeline setup. Team: you likely need 1–2 dedicated data engineers at this tier."
+    },
+    {
+      "from": "large",
+      "to": "hyper",
+      "trigger": "Data team >50 people (data engineers, analysts, data scientists, ML engineers), or real-time analytics required (fraud detection, live recommendations, operational dashboards with <1 minute staleness), or data volume exceeds warehouse price/performance sweet spot (>100TB, queries becoming expensive)",
+      "action": "Build a data lake and adopt data mesh principles. Here's how: (1) Data lake on S3/GCS using Apache Iceberg or Delta Lake table format — these provide ACID transactions, time travel, schema evolution, and efficient upserts on top of cheap object storage. This becomes your 'raw' layer, storing everything at minimal cost ($0.023/GB/month on S3 vs $0.023–0.04/GB/month on warehouses, but with compute separated). (2) Lakehouse architecture: use Trino or Databricks to query the lake with SQL, getting warehouse-like query performance on lake-priced storage. Databricks ($0.07/DBU for SQL Serverless) can replace or complement your existing warehouse for heavy workloads. (3) Stream processing with Apache Flink for real-time analytics: Flink processes Kafka streams with exactly-once semantics, windowed aggregations, complex event processing, and custom logic in Java/Python. Use this for fraud scoring (<100ms), real-time recommendations, live dashboards, and feeding ML feature stores. (4) Data mesh: decentralize data ownership so each business domain (payments, catalog, marketing) owns their data products end-to-end (collection, quality, transformation, serving). The central data platform team provides the infrastructure (lake, compute, catalog, access controls) as a self-service platform, but domains own their data. This scales the data practice without creating a central bottleneck. (5) ML feature store: Feast (open source) or Tecton (managed) for serving pre-computed features to ML models in both batch and real-time. Team: you need a dedicated data platform team (5–15 engineers at this scale) plus domain data engineers embedded in product teams. Time investment: 6–12 months for the foundational infrastructure, then continuous evolution."
+    }
+  ],
+  "sizes_cfg": {
+    "small": {
+      "range": "Direct Postgres queries or simple exports, <1M analytical rows",
+      "rec": "Don't build a data stack yet — it's premature complexity. Run analytics queries on a read replica off-peak (create the replica via your managed DB provider — AWS RDS, Cloud SQL, PlanetScale all do this in a few clicks). For business users, connect Metabase (free self-hosted, or $85/month hosted) directly to the replica. Metabase's point-and-click query builder lets non-technical users explore data without SQL. For more complex needs, Redash (free, open source) or Google Sheets + a simple export script work well. At this scale, your 'data pipeline' is 'read replica exists and BI tool points at it.' That's perfectly fine — avoid building infrastructure you don't need yet.",
+      "tools": [
+        "Metabase (free, self-hosted)",
+        "Postgres read replica",
+        "Redash (open source)",
+        "Google Sheets",
+        "pg_dump exports"
+      ]
+    },
+    "medium": {
+      "range": "Dedicated analytics DB, 1M–100M analytical rows",
+      "rec": "This is where you should make the clean separation. Export production data to a dedicated analytical store — BigQuery is the easiest starting point (generous free tier, zero infrastructure, pay-per-query). The pipeline: use Debezium for CDC if you need near-real-time, or a simple scheduled export (Airflow DAG running pg_dump → bq load, or Fivetran/Airbyte for managed extraction). Transform raw data with dbt: define staging models (clean, rename columns, cast types) and mart models (business-logic aggregations like 'daily revenue by product category'). Add dbt tests on every model: unique, not_null, accepted_values, relationships. Connect Metabase or Looker to the warehouse for dashboards. Monitor pipeline freshness — alert if any critical table hasn't been updated in >2× its expected refresh interval. This stack (Debezium/Fivetran → BigQuery/Snowflake → dbt → Metabase) is the 'modern data stack' that thousands of companies use successfully.",
+      "tools": [
+        "BigQuery or Snowflake",
+        "Debezium CDC or Fivetran",
+        "dbt (data build tool)",
+        "Metabase or Looker",
+        "Airflow or Dagster for orchestration"
+      ]
+    },
+    "large": {
+      "range": "Data warehouse + ETL pipelines, 100M–10B analytical rows",
+      "rec": "Full-featured data platform. CDC pipeline (Debezium → Kafka → warehouse connector) for near-real-time ingestion. Data warehouse (Snowflake for flexibility, BigQuery for serverless simplicity, ClickHouse for time-series performance). dbt for all transformations — maintain a well-organized dbt project with staging/intermediate/mart layers, tested and documented. Apache Airflow or Dagster for pipeline orchestration with SLA monitoring. Data catalog (DataHub, Amundsen, or OpenMetadata) so analysts can discover what data exists. Data quality monitoring with Great Expectations or Elementary: assert freshness, volume, schema integrity, and value distributions on every pipeline run. Column-level PII masking in the warehouse. Separate compute for different workloads (Snowflake virtual warehouses per team; BigQuery slot reservations per department) so one team's heavy query doesn't slow another's.",
+      "tools": [
+        "Snowflake or BigQuery or ClickHouse",
+        "dbt",
+        "Apache Airflow or Dagster",
+        "Kafka + Debezium",
+        "Great Expectations",
+        "DataHub or OpenMetadata"
+      ]
+    },
+    "hyper": {
+      "range": "Data lake + streaming analytics + data mesh, >10B rows, petabyte scale",
+      "rec": "Lakehouse architecture: data lake on S3/GCS with Apache Iceberg or Delta Lake table format providing ACID, time travel, and schema evolution on cheap storage. Query engine: Trino (open source, federated queries across lake + warehouse + operational DBs) or Databricks (managed Spark + SQL, best-in-class performance on Iceberg/Delta). Stream processing: Apache Flink for real-time analytics, complex event processing, and feeding ML feature stores — Flink handles event-time processing, late arrivals, and exactly-once semantics that simpler tools (Kafka Streams, Spark Structured Streaming) struggle with at scale. Data mesh: decentralize ownership so business domains own their data products. The platform team provides infrastructure as a service. Data marketplace: domains publish data products with SLAs, documentation, and quality guarantees. ML feature store: Feast (open source) for offline/online feature serving, or Tecton (managed, but expensive). This architecture is what Uber, Netflix, and Airbnb run — it requires a dedicated data platform team and significant ongoing investment.",
+      "tools": [
+        "Apache Iceberg or Delta Lake",
+        "Trino or Databricks",
+        "Apache Flink",
+        "Feast or Tecton",
+        "Kafka",
+        "custom data mesh platform"
+      ]
+    }
+  },
+  "children": []
+}

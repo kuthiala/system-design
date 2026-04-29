@@ -1,0 +1,1339 @@
+{
+  "type": "object",
+  "properties": {
+    "antiPatterns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "desc": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "desc",
+          "name"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "checklist": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "children": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "antiPatterns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "desc": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "desc",
+                "name"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "children": {
+            "type": "array",
+            "items": {}
+          },
+          "color": {
+            "type": "string"
+          },
+          "consistencySpectrum": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "desc": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "desc",
+                "name"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "detail": {
+            "type": "object",
+            "properties": {
+              "numbers": {
+                "type": "string"
+              },
+              "what": {
+                "type": "string"
+              },
+              "why": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "numbers",
+              "what",
+              "why"
+            ],
+            "additionalProperties": false
+          },
+          "examples": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "desc": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "desc",
+                "name"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "formulas": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "expr": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "note": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "expr",
+                "name",
+                "note"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "howItWorks": {
+            "type": "object",
+            "properties": {
+              "adaptive_throttling": {
+                "type": "string"
+              },
+              "continuous_batching": {
+                "type": "string"
+              },
+              "fair_queueing": {
+                "type": "string"
+              },
+              "hnsw": {
+                "type": "string"
+              },
+              "paged_attention": {
+                "type": "string"
+              },
+              "rag_pipeline": {
+                "type": "string"
+              },
+              "speculative_decoding": {
+                "type": "string"
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          "icon": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "keyInsight": {
+            "type": "string"
+          },
+          "keyPatterns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "desc": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "desc",
+                "name"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "levelUp": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                },
+                "trigger": {
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "mentalModel": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "pitfalls": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "desc": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "desc",
+                "name"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "primer": {
+            "type": "string"
+          },
+          "related": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "label"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "routingPatternComparison": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "bestFor": {
+                  "type": "string"
+                },
+                "cons": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "pros": {
+                  "type": "string"
+                },
+                "tools": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "bestFor",
+                "cons",
+                "name",
+                "pros",
+                "tools"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "short": {
+            "type": "string"
+          },
+          "sizes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sizes_cfg": {
+            "type": "object",
+            "properties": {
+              "hyper": {
+                "type": "object",
+                "properties": {
+                  "range": {
+                    "type": "string"
+                  },
+                  "rec": {
+                    "type": "string"
+                  },
+                  "tools": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "range",
+                  "rec",
+                  "tools"
+                ],
+                "additionalProperties": false
+              },
+              "large": {
+                "type": "object",
+                "properties": {
+                  "range": {
+                    "type": "string"
+                  },
+                  "rec": {
+                    "type": "string"
+                  },
+                  "tools": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "range",
+                  "rec",
+                  "tools"
+                ],
+                "additionalProperties": false
+              },
+              "medium": {
+                "type": "object",
+                "properties": {
+                  "range": {
+                    "type": "string"
+                  },
+                  "rec": {
+                    "type": "string"
+                  },
+                  "tools": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "range",
+                  "rec",
+                  "tools"
+                ],
+                "additionalProperties": false
+              },
+              "small": {
+                "type": "object",
+                "properties": {
+                  "range": {
+                    "type": "string"
+                  },
+                  "rec": {
+                    "type": "string"
+                  },
+                  "tools": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "range",
+                  "rec",
+                  "tools"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "hyper",
+              "large",
+              "medium"
+            ],
+            "additionalProperties": false
+          },
+          "stateTransitions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "condition": {
+                  "type": "string"
+                },
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                },
+                "userImpact": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "condition",
+                "from",
+                "to",
+                "userImpact"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "tradeoffs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "axis": {
+                  "type": "string"
+                },
+                "left": {
+                  "type": "string"
+                },
+                "pos": {
+                  "type": "number"
+                },
+                "right": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "axis",
+                "left",
+                "pos",
+                "right"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    "color": {
+      "type": "string"
+    },
+    "commercialLandscape": {
+      "type": "object",
+      "properties": {
+        "categories": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "entries": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "bestFor": {
+                      "type": "string"
+                    },
+                    "cost": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "strengths": {
+                      "type": "string"
+                    },
+                    "weaknesses": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "bestFor",
+                    "cost",
+                    "name",
+                    "strengths",
+                    "weaknesses"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "entries",
+              "name"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "categories",
+        "title"
+      ],
+      "additionalProperties": false
+    },
+    "coreFormulas": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "expr": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "expr",
+          "name",
+          "note"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "costModel": {
+      "type": "object",
+      "properties": {
+        "containers_managed": {
+          "type": "object",
+          "properties": {
+            "example": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "sweet_spot": {
+              "type": "string"
+            },
+            "trap": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "example",
+            "model",
+            "sweet_spot",
+            "trap"
+          ],
+          "additionalProperties": false
+        },
+        "containers_self_managed": {
+          "type": "object",
+          "properties": {
+            "example": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "sweet_spot": {
+              "type": "string"
+            },
+            "trap": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "example",
+            "model",
+            "sweet_spot",
+            "trap"
+          ],
+          "additionalProperties": false
+        },
+        "description": {
+          "type": "string"
+        },
+        "examples": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "hosted_cost": {
+                "type": "string"
+              },
+              "recommendation": {
+                "type": "string"
+              },
+              "scenario": {
+                "type": "string"
+              },
+              "self_hosted_cost": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "hosted_cost",
+              "recommendation",
+              "scenario",
+              "self_hosted_cost"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "serverless": {
+          "type": "object",
+          "properties": {
+            "example": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "sweet_spot": {
+              "type": "string"
+            },
+            "trap": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "example",
+            "model",
+            "sweet_spot",
+            "trap"
+          ],
+          "additionalProperties": false
+        },
+        "spot": {
+          "type": "object",
+          "properties": {
+            "example": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "sweet_spot": {
+              "type": "string"
+            },
+            "trap": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "example",
+            "model",
+            "sweet_spot",
+            "trap"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "decisionFramework": {
+      "type": "object",
+      "properties": {
+        "factors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "matrix": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "answer": {
+                "type": "string"
+              },
+              "scenario": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "answer",
+              "scenario"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "question": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "factors",
+        "matrix",
+        "question"
+      ],
+      "additionalProperties": false
+    },
+    "decisionMatrix": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "answer": {
+            "type": "string"
+          },
+          "reasoning": {
+            "type": "string"
+          },
+          "recommendation": {
+            "type": "string"
+          },
+          "scenario": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "scenario"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "defined_terms": {
+      "type": "object",
+      "properties": {
+        "Anycast": {
+          "type": "string"
+        },
+        "AuthN vs AuthZ": {
+          "type": "string"
+        },
+        "BGP": {
+          "type": "string"
+        },
+        "Cardinality": {
+          "type": "string"
+        },
+        "Error budget": {
+          "type": "string"
+        },
+        "Golden signals": {
+          "type": "string"
+        },
+        "Head-of-line blocking": {
+          "type": "string"
+        },
+        "JWT": {
+          "type": "string"
+        },
+        "MTBF": {
+          "type": "string"
+        },
+        "MTTD": {
+          "type": "string"
+        },
+        "MTTR": {
+          "type": "string"
+        },
+        "OAuth2": {
+          "type": "string"
+        },
+        "PoP": {
+          "type": "string"
+        },
+        "RBAC / ABAC": {
+          "type": "string"
+        },
+        "RPO": {
+          "type": "string"
+        },
+        "RTO": {
+          "type": "string"
+        },
+        "SLA": {
+          "type": "string"
+        },
+        "SLI": {
+          "type": "string"
+        },
+        "SLO": {
+          "type": "string"
+        },
+        "SLO-based alerting": {
+          "type": "string"
+        },
+        "Secrets manager": {
+          "type": "string"
+        },
+        "Service mesh": {
+          "type": "string"
+        },
+        "Trace sampling": {
+          "type": "string"
+        },
+        "Zero-trust": {
+          "type": "string"
+        },
+        "blast_radius": {
+          "type": "string"
+        },
+        "bulkhead": {
+          "type": "string"
+        },
+        "error_budget": {
+          "type": "string"
+        },
+        "mTLS": {
+          "type": "string"
+        },
+        "split_brain": {
+          "type": "string"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "defined_terms_cfg": {
+      "type": "object",
+      "properties": {
+        "hyper": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "large": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "medium": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "small": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "hyper",
+        "large",
+        "medium",
+        "small"
+      ],
+      "additionalProperties": false
+    },
+    "detail": {
+      "type": "object",
+      "properties": {
+        "keyInsight": {
+          "type": "string"
+        },
+        "keyRegulations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "architecturalImpact": {
+                "type": "string"
+              },
+              "jurisdiction": {
+                "type": "string"
+              },
+              "keyRequirements": {
+                "type": "string"
+              },
+              "maxFine": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "scope": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "architecturalImpact",
+              "jurisdiction",
+              "keyRequirements",
+              "maxFine",
+              "name",
+              "scope"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "numbers": {
+          "type": "string"
+        },
+        "what": {
+          "type": "string"
+        },
+        "why": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "numbers",
+        "what",
+        "why"
+      ],
+      "additionalProperties": false
+    },
+    "examples": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "desc": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "desc",
+          "name"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "formulas": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "expr": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "expr",
+          "name",
+          "note"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "icon": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string"
+    },
+    "keyInsight": {
+      "type": "string"
+    },
+    "keyMetrics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "alert_high": {
+            "type": "string"
+          },
+          "alert_low": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "alert_high",
+          "name",
+          "target",
+          "tools"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "levelUp": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "trigger": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    "mentalModel": {
+      "type": "string"
+    },
+    "migrationPlaybook": {
+      "type": "object",
+      "properties": {
+        "from_database_blobs": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "type": "string"
+            },
+            "steps": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "description",
+            "steps"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "from_database_blobs"
+      ],
+      "additionalProperties": false
+    },
+    "name": {
+      "type": "string"
+    },
+    "phase": {
+      "type": "string"
+    },
+    "pitfalls": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "desc": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "desc",
+          "name"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "primer": {
+      "type": "string"
+    },
+    "principles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "desc": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "desc",
+          "name"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "short": {
+      "type": "string"
+    },
+    "sizes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "sizes_cfg": {
+      "type": "object",
+      "properties": {
+        "hyper": {
+          "type": "object",
+          "properties": {
+            "range": {
+              "type": "string"
+            },
+            "rec": {
+              "type": "string"
+            },
+            "tools": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "range",
+            "rec",
+            "tools"
+          ],
+          "additionalProperties": false
+        },
+        "large": {
+          "type": "object",
+          "properties": {
+            "range": {
+              "type": "string"
+            },
+            "rec": {
+              "type": "string"
+            },
+            "tools": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "range",
+            "rec",
+            "tools"
+          ],
+          "additionalProperties": false
+        },
+        "medium": {
+          "type": "object",
+          "properties": {
+            "range": {
+              "type": "string"
+            },
+            "rec": {
+              "type": "string"
+            },
+            "tools": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "range",
+            "rec",
+            "tools"
+          ],
+          "additionalProperties": false
+        },
+        "small": {
+          "type": "object",
+          "properties": {
+            "range": {
+              "type": "string"
+            },
+            "rec": {
+              "type": "string"
+            },
+            "tools": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "range",
+            "rec",
+            "tools"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "hyper",
+        "large",
+        "medium",
+        "small"
+      ],
+      "additionalProperties": false
+    },
+    "technologyComparison": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "bestFor": {
+            "type": "string"
+          },
+          "durability": {
+            "type": "string"
+          },
+          "latency": {
+            "type": "string"
+          },
+          "multiConsumer": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "ordering": {
+            "type": "string"
+          },
+          "replay": {
+            "type": "string"
+          },
+          "throughput": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "weaknesses": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "bestFor",
+          "durability",
+          "latency",
+          "multiConsumer",
+          "name",
+          "ordering",
+          "replay",
+          "throughput",
+          "type",
+          "weaknesses"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "tradeoffs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "axis": {
+            "type": "string"
+          },
+          "left": {
+            "type": "string"
+          },
+          "pos": {
+            "type": "number"
+          },
+          "right": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "axis",
+          "left",
+          "pos",
+          "right"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "children",
+    "color",
+    "detail",
+    "examples",
+    "icon",
+    "id",
+    "levelUp",
+    "name",
+    "phase",
+    "pitfalls",
+    "short",
+    "sizes",
+    "tradeoffs"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "./schema/phase.schema.json",
+  "title": "Phase data"
+}

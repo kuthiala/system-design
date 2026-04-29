@@ -17,40 +17,10 @@ const PHASE_COLORS = {
 };
 
 // ══════════════════════════════════════════════════════════════
-// TREE ASSEMBLY
+// TREE — populated asynchronously in init()
 // ══════════════════════════════════════════════════════════════
 
-const TREE = {
-  name:"System Design Framework", id:"root", icon:"⚙️", phase:"root",
-  short:"End-to-end decisions for any scale",
-  detail:{
-    what:"A systematic decision framework that adapts every architectural concept to your company's actual scale. Start at Phase 1 and follow the branches that match your requirements.",
-    why:"Wrong architecture for your scale wastes money (over-engineered) or causes outages (under-engineered). This tree gives you the right answer at each scale.",
-    numbers:"Thresholds: Small <1K RPS, Medium 1K–50K RPS, Large 50K–500K RPS, Hyper >500K RPS"
-  },
-  tradeoffs:[
-    {axis:"Over-engineering vs Under-engineering", left:"Too simple → outages", right:"Too complex → slow velocity", pos:0.5},
-    {axis:"Build vs Buy", left:"Custom → control", right:"Managed → speed", pos:0.5}
-  ],
-  levelUp:[],
-  children:[
-    PHASE_REQUIREMENTS, PHASE_ARCHITECTURE, PHASE_API, PHASE_DATABASE,
-    PHASE_SHARDING, PHASE_COMPUTE, PHASE_MESSAGING, PHASE_STORAGE,
-    PHASE_RELIABILITY, PHASE_NETWORKING, PHASE_OBSERVABILITY, PHASE_SECURITY,
-    PHASE_OPERATIONS, PHASE_ANALYTICS, PHASE_COST, PHASE_ML,
-    PHASE_MULTITENANCY, PHASE_REALTIME, PHASE_COMPLIANCE, PHASE_TESTING,
-    PHASE_MIGRATIONS
-  ]
-};
-
-// Annotate every node with depth, parent, and a stable ID
-(function flatten(node, parent = null, depth = 0) {
-  node._parent = parent;
-  node._depth = depth;
-  node._collapsed = depth >= 1;
-  node._id = node.id || Math.random().toString(36).slice(2);
-  if (node.children) node.children.forEach(c => flatten(c, node, depth + 1));
-})(TREE);
+let TREE;
 
 // ══════════════════════════════════════════════════════════════
 // STATE
@@ -403,7 +373,6 @@ function buildSizeCards(cfg) {
 
 function buildTradeoffs(tradeoffs) {
   const items = tradeoffs.map(t => {
-    // Always start at 50%; the user drags to feel either extreme.
     return `<div class="ta">
       <div class="ta-name">↔ ${t.axis}</div>
       <div class="ta-labels">
@@ -529,6 +498,190 @@ function buildRelatedLinks(related) {
   return section("Related Concepts", `<div class="related">${links}</div>`);
 }
 
+function buildPrimer(text) {
+  return section("Primer 📖", `<p style="font-style:italic;color:#94a3b8">${text}</p>`);
+}
+
+function buildKeyInsight(text) {
+  return `<div class="ds ki"><h3>Key Insight 💡</h3><p>${text}</p></div>`;
+}
+
+function buildMentalModel(text) {
+  return section("Mental Model 🧠", `<p style="color:#c4b5fd">${text}</p>`);
+}
+
+function buildPrinciples(items) {
+  return section("Principles", items.map(p =>
+    `<div class="pit" style="border-left-color:#818cf8"><div class="pit-t" style="color:#818cf8">${p.name}</div><div class="pit-d">${p.desc}</div></div>`
+  ).join(""));
+}
+
+function buildChecklist(items) {
+  return section("Pre-flight Checklist ✅", `<ul>${items.map(i => `<li>${i}</li>`).join("")}</ul>`);
+}
+
+function buildKeyMetrics(items) {
+  const rows = items.map(m => {
+    const tools = m.tools?.length ? `<div style="margin-top:3px;display:flex;flex-wrap:wrap;gap:3px">${m.tools.map(t=>`<span class="tool">${t}</span>`).join("")}</div>` : "";
+    return `<div class="km">
+      <div class="km-name">${m.name}</div>
+      <div class="km-target">🎯 Target: ${m.target}</div>
+      ${m.alert_high ? `<div class="km-alert hi">🔴 High: ${m.alert_high}</div>` : ""}
+      ${m.alert_low  ? `<div class="km-alert lo">🔵 Low: ${m.alert_low}</div>`  : ""}
+      ${tools}
+    </div>`;
+  }).join("");
+  return section("Key Metrics 📊", rows);
+}
+
+function buildDecisionMatrix(items) {
+  const rows = items.map(m =>
+    `<div class="dm">
+      <div class="dm-scenario">${m.scenario}</div>
+      ${m.answer         ? `<div class="dm-answer">→ ${m.answer}</div>` : ""}
+      ${m.recommendation ? `<div class="dm-answer">→ ${m.recommendation}</div>` : ""}
+      ${m.reasoning      ? `<div class="dm-reason">${m.reasoning}</div>` : ""}
+    </div>`
+  ).join("");
+  return section("Decision Matrix", rows);
+}
+
+function buildDecisionFramework(df) {
+  const factors = df.factors?.length
+    ? `<div style="margin-bottom:8px"><div style="font-size:10px;color:#64748b;font-weight:600;margin-bottom:4px">Key Factors</div><ul>${df.factors.map(f=>`<li>${f}</li>`).join("")}</ul></div>`
+    : "";
+  const matrix = df.matrix?.length ? buildDecisionMatrix(df.matrix) : "";
+  return section(`Decision Framework: ${df.question}`, factors) + matrix;
+}
+
+function buildTechnologyComparison(items) {
+  const rows = items.map(t =>
+    `<div class="tc">
+      <div class="tc-name">${t.name} <span class="tc-type">${t.type}</span></div>
+      <div class="tc-grid">
+        <span class="tc-k">Throughput</span><span class="tc-v">${t.throughput}</span>
+        <span class="tc-k">Latency</span><span class="tc-v">${t.latency}</span>
+        <span class="tc-k">Durability</span><span class="tc-v">${t.durability}</span>
+        <span class="tc-k">Ordering</span><span class="tc-v">${t.ordering}</span>
+        <span class="tc-k">Replay</span><span class="tc-v">${t.replay}</span>
+        <span class="tc-k">Multi-consumer</span><span class="tc-v">${t.multiConsumer}</span>
+      </div>
+      <div class="tc-best">Best for: ${t.bestFor}</div>
+      <div class="tc-weak">⚠ ${t.weaknesses}</div>
+    </div>`
+  ).join("");
+  return section("Technology Comparison", rows);
+}
+
+function buildCommercialLandscape(cl) {
+  const cats = cl.categories.map(cat => {
+    const entries = cat.entries.map(e =>
+      `<div class="cl-entry">
+        <div class="cl-name">${e.name}</div>
+        <div class="cl-best">Best for: ${e.bestFor}</div>
+        <div class="cl-cost">💰 ${e.cost}</div>
+        <div class="cl-str">✅ ${e.strengths}</div>
+        <div class="cl-weak">⚠ ${e.weaknesses}</div>
+      </div>`
+    ).join("");
+    return `<div class="cl-cat"><div class="cl-cat-name">${cat.name}</div>${entries}</div>`;
+  }).join("");
+  return section(cl.title || "Commercial Landscape", cats);
+}
+
+function buildCostModel(cm) {
+  const parts = [];
+  if (cm.description) parts.push(`<p style="color:#94a3b8;font-style:italic;margin-bottom:8px">${cm.description}</p>`);
+  const tiers = ["serverless","containers_managed","containers_self_managed","spot"].filter(k => cm[k]);
+  if (tiers.length) {
+    parts.push(tiers.map(k => {
+      const t = cm[k];
+      const label = k.replace(/_/g," ").replace(/\b\w/g,c=>c.toUpperCase());
+      return `<div class="cm-tier">
+        <div class="cm-tier-name">${label}</div>
+        <div class="cm-model">${t.model}</div>
+        <div class="cm-sweet">✅ ${t.sweet_spot}</div>
+        <div class="cm-trap">⚠ ${t.trap}</div>
+        <div class="cm-ex">e.g. ${t.example}</div>
+      </div>`;
+    }).join(""));
+  }
+  if (cm.examples?.length) {
+    parts.push(cm.examples.map(e =>
+      `<div class="dm">
+        <div class="dm-scenario">${e.scenario}</div>
+        <div class="dm-answer">Hosted: ${e.hosted_cost} &nbsp;·&nbsp; Self-hosted: ${e.self_hosted_cost}</div>
+        <div class="dm-reason">${e.recommendation}</div>
+      </div>`
+    ).join(""));
+  }
+  return section("Cost Model 💰", parts.join(""));
+}
+
+function buildDefinedTerms(terms, cfg, activeSize) {
+  const relevant = cfg && activeSize ? (cfg[activeSize] || []) : Object.keys(terms);
+  const show = relevant.length ? relevant : Object.keys(terms);
+  const items = show.filter(k => terms[k]).map(k =>
+    `<div class="dt"><span class="dt-k">${k}</span><span class="dt-v">${terms[k]}</span></div>`
+  ).join("");
+  return section("Glossary 📚", `<div class="dt-list">${items}</div>`);
+}
+
+function buildMigrationPlaybook(pb) {
+  const sections = Object.entries(pb).map(([key, val]) => {
+    const title = key.replace(/_/g," ").replace(/\b\w/g,c=>c.toUpperCase());
+    const steps = val.steps?.map((s,i) => `<div class="mp-step"><span class="mp-n">${i+1}</span>${s}</div>`).join("") || "";
+    return `<div class="mp-section"><div class="mp-title">${title}</div>${val.description ? `<p style="color:#94a3b8;font-size:11px;margin-bottom:6px">${val.description}</p>` : ""}${steps}</div>`;
+  }).join("");
+  return section("Migration Playbook 🗺", sections);
+}
+
+function buildKeyPatterns(items) {
+  return section("Key Patterns", items.map(p =>
+    `<div class="pit" style="border-left-color:#06b6d4"><div class="pit-t" style="color:#06b6d4">${p.name}</div><div class="pit-d">${p.desc}</div></div>`
+  ).join(""));
+}
+
+function buildConsistencySpectrum(items) {
+  return section("Consistency Spectrum", items.map((c,i) =>
+    `<div class="pit" style="border-left-color:hsl(${200 + i*30},70%,55%)"><div class="pit-t" style="color:hsl(${200 + i*30},70%,65%)">${c.name}</div><div class="pit-d">${c.desc}</div></div>`
+  ).join(""));
+}
+
+function buildRoutingPatternComparison(items) {
+  const rows = items.map(r =>
+    `<div class="tc">
+      <div class="tc-name">${r.name}</div>
+      <div class="tc-grid">
+        <span class="tc-k">Pros</span><span class="tc-v">${r.pros}</span>
+        <span class="tc-k">Cons</span><span class="tc-v">${r.cons}</span>
+        <span class="tc-k">Best for</span><span class="tc-v">${r.bestFor}</span>
+      </div>
+      <div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:3px">${r.tools.map(t=>`<span class="tool">${t}</span>`).join("")}</div>
+    </div>`
+  ).join("");
+  return section("Routing Pattern Comparison", rows);
+}
+
+function buildStateTransitions(items) {
+  const rows = items.map(t =>
+    `<div class="st">
+      <div class="st-states"><span class="st-from">${t.from}</span> → <span class="st-to">${t.to}</span></div>
+      <div class="st-cond">When: ${t.condition}</div>
+      <div class="st-impact">User impact: ${t.userImpact}</div>
+    </div>`
+  ).join("");
+  return section("State Transitions", rows);
+}
+
+function buildHowItWorks(obj) {
+  const items = Object.entries(obj).map(([k, v]) => {
+    const label = k.replace(/_/g," ").replace(/\b\w/g,c=>c.toUpperCase());
+    return `<div class="pit" style="border-left-color:#a855f7"><div class="pit-t" style="color:#c084fc">${label}</div><div class="pit-d">${v}</div></div>`;
+  }).join("");
+  return section("How It Works ⚙️", items);
+}
+
 function buildExampleOverlay(node) {
   if (!activeExample?.nodes) return "";
 
@@ -579,23 +732,14 @@ function showDetail(node) {
   if (node.short) {
     html += `<div style="color:#94a3b8;font-size:12px;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid #1e2433">${node.short}</div>`;
   }
+  if (node.keyInsight)  html += buildKeyInsight(node.keyInsight);
+  if (node.mentalModel) html += buildMentalModel(node.mentalModel);
+  if (node.primer)      html += buildPrimer(node.primer);
 
-  // 1. What
-  if (node.detail?.what) {
-    html += section("What", `<p>${node.detail.what}</p>`);
-  }
-  // 2. Why
-  if (node.detail?.why) {
-    html += section("Why", `<p>${node.detail.why}</p>`);
-  }
-  // 3. Tradeoffs
-  if (node.tradeoffs?.length) {
-    html += buildTradeoffs(node.tradeoffs);
-  }
-  // 4. Numbers
-  if (node.detail?.numbers) {
-    html += section("Numbers", `<p style=\"color:#fbbf24;font-size:11px\">📐 ${node.detail.numbers}</p>`);
-  }
+  if (node.detail?.what)    html += section("What", `<p>${node.detail.what}</p>`);
+  if (node.detail?.why)     html += section("Why",  `<p>${node.detail.why}</p>`);
+  if (node.tradeoffs?.length) html += buildTradeoffs(node.tradeoffs);
+  if (node.detail?.numbers) html += section("Numbers", `<p style="color:#fbbf24;font-size:11px">📐 ${node.detail.numbers}</p>`);
   // 5. Common Pitfalls
   if (node.pitfalls?.length) {
     html += buildPitfalls(node.pitfalls);
@@ -612,11 +756,26 @@ function showDetail(node) {
   if (node.examples?.length) {
     html += buildExamples(node.examples);
   }
-  // (Other sections remain after examples)
-  if (node.formulas?.length)           html += buildFormulas(node.formulas);
-  if (node.antiPatterns?.length)       html += buildAntiPatterns(node.antiPatterns);
-  if (node.related?.length)            html += buildRelatedLinks(node.related);
-  if (activeExample)                   html += buildExampleOverlay(node);
+  if (node.formulas?.length)                  html += buildFormulas(node.formulas);
+  if (node.coreFormulas?.length)              html += buildFormulas(node.coreFormulas);
+  if (node.antiPatterns?.length)              html += buildAntiPatterns(node.antiPatterns);
+  if (node.keyPatterns?.length)               html += buildKeyPatterns(node.keyPatterns);
+  if (node.consistencySpectrum?.length)       html += buildConsistencySpectrum(node.consistencySpectrum);
+  if (node.routingPatternComparison?.length)  html += buildRoutingPatternComparison(node.routingPatternComparison);
+  if (node.stateTransitions?.length)          html += buildStateTransitions(node.stateTransitions);
+  if (node.howItWorks && Object.keys(node.howItWorks).length) html += buildHowItWorks(node.howItWorks);
+  if (node.technologyComparison?.length)      html += buildTechnologyComparison(node.technologyComparison);
+  if (node.decisionMatrix?.length)            html += buildDecisionMatrix(node.decisionMatrix);
+  if (node.decisionFramework)                 html += buildDecisionFramework(node.decisionFramework);
+  if (node.commercialLandscape)               html += buildCommercialLandscape(node.commercialLandscape);
+  if (node.costModel)                         html += buildCostModel(node.costModel);
+  if (node.keyMetrics?.length)                html += buildKeyMetrics(node.keyMetrics);
+  if (node.principles?.length)                html += buildPrinciples(node.principles);
+  if (node.checklist?.length)                 html += buildChecklist(node.checklist);
+  if (node.migrationPlaybook)                 html += buildMigrationPlaybook(node.migrationPlaybook);
+  if (node.defined_terms && Object.keys(node.defined_terms).length) html += buildDefinedTerms(node.defined_terms, node.defined_terms_cfg, null);
+  if (node.related?.length)                   html += buildRelatedLinks(node.related);
+  if (activeExample)                          html += buildExampleOverlay(node);
 
   document.getElementById("dp-body").innerHTML = html;
 
@@ -697,11 +856,12 @@ function navigateTo(node) {
 }
 
 // ══════════════════════════════════════════════════════════════
-// SIDEBAR — PHASE NAV
+// SIDEBAR — PHASE NAV (built in init)
 // ══════════════════════════════════════════════════════════════
 
-(function buildPhaseNav() {
+function buildPhaseNav() {
   const nav = document.getElementById("phase-nav");
+  nav.innerHTML = "";
   TREE.children.forEach(phase => {
     const el  = document.createElement("div");
     el.className   = "pn";
@@ -727,7 +887,7 @@ function navigateTo(node) {
 
     nav.appendChild(el);
   });
-})();
+}
 
 // ══════════════════════════════════════════════════════════════
 // SIDEBAR — SEARCH
@@ -1174,67 +1334,121 @@ function resetState() {
 
 
 // ══════════════════════════════════════════════════════════════
-// INIT — restore persisted state, then render
+// INIT — load JSON data, build tree, restore persisted state
 // ══════════════════════════════════════════════════════════════
 
-TREE._collapsed = false;
-
-// 1. Restore expanded nodes before first render
-const savedExpanded = persist.load(PERSIST_KEYS.expanded);
-if (savedExpanded) {
-  const expandedIds = new Set(savedExpanded);
-  (function restoreCollapse(n) {
-    if (n.id && n._depth >= 1) n._collapsed = !expandedIds.has(n.id);
-    if (n.children) n.children.forEach(restoreCollapse);
-  })(TREE);
+async function loadPhasesFromJSON() {
+  const indexRes = await fetch("./data/index.json");
+  if (!indexRes.ok) throw new Error(`index.json fetch failed: ${indexRes.status}`);
+  const index = await indexRes.json();
+  return Promise.all(
+    index.phases.map(file =>
+      fetch(`./data/${file}`).then(r => {
+        if (!r.ok) throw new Error(`${file} fetch failed: ${r.status}`);
+        return r.json();
+      })
+    )
+  );
 }
 
-// 2. Restore active example before render + showDetail
-const savedExampleId = persist.load(PERSIST_KEYS.example);
-if (savedExampleId) {
-  const ex = (window.EXAMPLES || []).find(e => e.id === savedExampleId);
-  if (ex) {
-    activeExample = ex;
-    const sel = document.getElementById("example-select");
-    if (sel) sel.value = savedExampleId;
-    const overview = document.getElementById("example-overview");
-    if (overview) {
-      overview.classList.add("active");
-      overview.innerHTML = `
-        <div class="ex-tagline">${ex.tagline || ""}</div>
-        <div class="ex-overview-text">${ex.overview || ""}</div>
-      `;
+async function init() {
+  const phases = await loadPhasesFromJSON();
+
+  TREE = {
+    name:"System Design Framework", id:"root", icon:"⚙️", phase:"root",
+    short:"End-to-end decisions for any scale",
+    detail:{
+      what:"A systematic decision framework that adapts every architectural concept to your company's actual scale. Start at Phase 1 and follow the branches that match your requirements.",
+      why:"Wrong architecture for your scale wastes money (over-engineered) or causes outages (under-engineered). This tree gives you the right answer at each scale.",
+      numbers:"Thresholds: Small <1K RPS, Medium 1K–50K RPS, Large 50K–500K RPS, Hyper >500K RPS"
+    },
+    tradeoffs:[
+      {axis:"Over-engineering vs Under-engineering", left:"Too simple → outages", right:"Too complex → slow velocity", pos:0.5},
+      {axis:"Build vs Buy", left:"Custom → control", right:"Managed → speed", pos:0.5}
+    ],
+    levelUp:[],
+    children: phases
+  };
+
+  // Annotate every node with depth, parent, and a stable ID
+  (function flatten(node, parent = null, depth = 0) {
+    node._parent = parent;
+    node._depth = depth;
+    node._collapsed = depth >= 1;
+    node._id = node.id || Math.random().toString(36).slice(2);
+    if (node.children) node.children.forEach(c => flatten(c, node, depth + 1));
+  })(TREE);
+
+  TREE._collapsed = false;
+
+  // 1. Restore expanded nodes before first render
+  const savedExpanded = persist.load(PERSIST_KEYS.expanded);
+  if (savedExpanded) {
+    const expandedIds = new Set(savedExpanded);
+    (function restoreCollapse(n) {
+      if (n.id && n._depth >= 1) n._collapsed = !expandedIds.has(n.id);
+      if (n.children) n.children.forEach(restoreCollapse);
+    })(TREE);
+  }
+
+  // 2. Restore active example before render + showDetail
+  const savedExampleId = persist.load(PERSIST_KEYS.example);
+  if (savedExampleId) {
+    const ex = (window.EXAMPLES || []).find(e => e.id === savedExampleId);
+    if (ex) {
+      activeExample = ex;
+      const sel = document.getElementById("example-select");
+      if (sel) sel.value = savedExampleId;
+      const overview = document.getElementById("example-overview");
+      if (overview) {
+        overview.classList.add("active");
+        overview.innerHTML = `
+          <div class="ex-tagline">${ex.tagline || ""}</div>
+          <div class="ex-overview-text">${ex.overview || ""}</div>
+        `;
+      }
     }
   }
+
+  // Build phase nav sidebar
+  buildPhaseNav();
+
+  // Sync diagram button visibility after example restore
+  if (window._syncDiagramBtn) window._syncDiagramBtn();
+
+  // 3. Restore selected node before render (so highlight is drawn on first pass)
+  const savedNodeId  = persist.load(PERSIST_KEYS.node);
+  const restoredNode = savedNodeId ? findNodeById(TREE, savedNodeId) : null;
+  if (restoredNode) selectedNode = restoredNode;
+
+  // 4. Restore examples-collapsed state
+  examplesCollapsed = persist.load(PERSIST_KEYS.exCollapsed) === true;
+
+  render();
+  _initialized = true;
+
+  // 5. Restore zoom — skip fitView if a saved transform exists
+  const savedZoom = persist.load(PERSIST_KEYS.zoom);
+  if (savedZoom) {
+    svg.call(zoom.transform, d3.zoomIdentity.translate(savedZoom.x, savedZoom.y).scale(savedZoom.k));
+  } else {
+    setTimeout(fitView, 100);
+  }
+
+  // 6. Populate detail panel for the restored node
+  if (restoredNode) showDetail(restoredNode);
+
+  // 7. Restore panel width
+  const savedPanelWidth = persist.load(PERSIST_KEYS.panelWidth);
+  if (savedPanelWidth) document.getElementById("dp").style.width = savedPanelWidth;
+
+  window.addEventListener("resize", render);
 }
 
-// Sync diagram button visibility after example restore
-if (window._syncDiagramBtn) window._syncDiagramBtn();
-
-// 3. Restore selected node before render (so highlight is drawn on first pass)
-const savedNodeId    = persist.load(PERSIST_KEYS.node);
-const restoredNode   = savedNodeId ? findNodeById(TREE, savedNodeId) : null;
-if (restoredNode) selectedNode = restoredNode;
-
-// 4. Restore examples-collapsed state
-examplesCollapsed = persist.load(PERSIST_KEYS.exCollapsed) === true;
-
-render();
-_initialized = true;
-
-// 5. Restore zoom — skip fitView if a saved transform exists
-const savedZoom = persist.load(PERSIST_KEYS.zoom);
-if (savedZoom) {
-  svg.call(zoom.transform, d3.zoomIdentity.translate(savedZoom.x, savedZoom.y).scale(savedZoom.k));
-} else {
-  setTimeout(fitView, 100);
-}
-
-// 6. Populate detail panel for the restored node
-if (restoredNode) showDetail(restoredNode);
-
-// 7. Restore panel width
-const savedPanelWidth = persist.load(PERSIST_KEYS.panelWidth);
-if (savedPanelWidth) document.getElementById("dp").style.width = savedPanelWidth;
-
-window.addEventListener("resize", render);
+init().catch(err => {
+  console.error("Failed to load phase data:", err);
+  document.getElementById("dp-body").innerHTML =
+    `<p style="color:#ef4444;padding:16px;font-size:13px">
+      <strong>Failed to load phase data.</strong><br>${err.message}
+    </p>`;
+});

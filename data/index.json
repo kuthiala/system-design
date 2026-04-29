@@ -1,0 +1,25 @@
+{
+  "phases": [
+    "phase-01-requirements.json",
+    "phase-02-architecture.json",
+    "phase-03-api.json",
+    "phase-04-database.json",
+    "phase-05-sharding.json",
+    "phase-06-compute.json",
+    "phase-07-messaging.json",
+    "phase-08-storage.json",
+    "phase-09-reliability.json",
+    "phase-10-networking.json",
+    "phase-11-observability.json",
+    "phase-12-security.json",
+    "phase-13-operations.json",
+    "phase-14-analytics.json",
+    "phase-15-cost.json",
+    "phase-16-ml.json",
+    "phase-17-multitenancy.json",
+    "phase-18-realtime.json",
+    "phase-19-compliance.json",
+    "phase-20-testing.json",
+    "phase-21-migrations.json"
+  ]
+}

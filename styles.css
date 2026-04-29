@@ -187,6 +187,73 @@ html,body{height:100%;overflow:hidden;background:#080b14;font-family:'BlinkMacSy
 .rel-link{font-size:10px;background:#1a1733;border:1px solid #2d2a6b;border-radius:4px;padding:3px 8px;color:#a78bfa;cursor:pointer;transition:.15s}
 .rel-link:hover{background:#2d2a6b;color:#e2e8f0}
 
+/* Key Insight */
+.ki{background:linear-gradient(135deg,#0a1628,#0f1f40);border:1px solid #1d3a6b;border-radius:7px;padding:10px 12px}
+.ki h3{color:#60a5fa!important}
+.ki p{color:#bfdbfe!important;font-style:italic}
+
+/* Key Metrics */
+.km{background:#0a0d14;border:1px solid #1e2433;border-radius:6px;padding:8px 11px;margin-bottom:6px}
+.km-name{font-size:11px;font-weight:700;color:#e2e8f0;margin-bottom:3px}
+.km-target{font-size:10px;color:#34d399;margin-bottom:2px}
+.km-alert{font-size:10px;margin-bottom:1px}
+.km-alert.hi{color:#f87171}
+.km-alert.lo{color:#60a5fa}
+
+/* Decision Matrix */
+.dm{background:#0a0d14;border:1px solid #1e2433;border-radius:6px;padding:9px 11px;margin-bottom:6px}
+.dm-scenario{font-size:11px;font-weight:600;color:#c4b5fd;margin-bottom:4px}
+.dm-answer{font-size:11px;color:#34d399;line-height:1.5;margin-bottom:2px}
+.dm-reason{font-size:10px;color:#64748b;font-style:italic;line-height:1.4;margin-top:3px}
+
+/* Technology Comparison */
+.tc{background:#0a0d14;border:1px solid #1e2433;border-radius:6px;padding:9px 11px;margin-bottom:7px}
+.tc-name{font-size:11px;font-weight:700;color:#e2e8f0;margin-bottom:5px}
+.tc-type{font-size:9px;font-weight:400;background:#1e2433;border-radius:3px;padding:1px 5px;color:#94a3b8;margin-left:5px}
+.tc-grid{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;margin-bottom:5px}
+.tc-k{font-size:9px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.5px;padding-top:1px}
+.tc-v{font-size:10px;color:#94a3b8;line-height:1.4}
+.tc-best{font-size:10px;color:#34d399;margin-bottom:2px}
+.tc-weak{font-size:10px;color:#fbbf24;line-height:1.4}
+
+/* Commercial Landscape */
+.cl-cat{margin-bottom:12px}
+.cl-cat-name{font-size:10px;font-weight:700;color:#7c5af6;text-transform:uppercase;letter-spacing:.8px;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid #1e2433}
+.cl-entry{background:#0a0d14;border:1px solid #1e2433;border-radius:6px;padding:8px 10px;margin-bottom:5px}
+.cl-name{font-size:11px;font-weight:700;color:#e2e8f0;margin-bottom:3px}
+.cl-best{font-size:10px;color:#34d399;margin-bottom:2px}
+.cl-cost{font-size:10px;color:#fbbf24;margin-bottom:2px}
+.cl-str{font-size:10px;color:#94a3b8;margin-bottom:2px;line-height:1.4}
+.cl-weak{font-size:10px;color:#f87171;line-height:1.4}
+
+/* Cost Model tiers */
+.cm-tier{background:#0a0d14;border:1px solid #1e2433;border-radius:6px;padding:8px 10px;margin-bottom:6px}
+.cm-tier-name{font-size:10px;font-weight:700;color:#c4b5fd;text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px}
+.cm-model{font-size:11px;color:#e2e8f0;margin-bottom:2px}
+.cm-sweet{font-size:10px;color:#34d399;margin-bottom:2px}
+.cm-trap{font-size:10px;color:#fbbf24;margin-bottom:2px}
+.cm-ex{font-size:10px;color:#64748b;font-style:italic}
+
+/* Glossary / Defined Terms */
+.dt-list{display:flex;flex-direction:column;gap:5px}
+.dt{display:grid;grid-template-columns:auto 1fr;gap:4px 8px;background:#0a0d14;border:1px solid #1e2433;border-radius:5px;padding:6px 9px}
+.dt-k{font-size:10px;font-weight:700;color:#a78bfa;white-space:nowrap}
+.dt-v{font-size:10px;color:#94a3b8;line-height:1.4}
+
+/* Migration Playbook */
+.mp-section{margin-bottom:10px}
+.mp-title{font-size:10px;font-weight:700;color:#34d399;text-transform:uppercase;letter-spacing:.8px;margin-bottom:5px}
+.mp-step{display:flex;gap:8px;margin-bottom:5px;font-size:10px;color:#94a3b8;line-height:1.4}
+.mp-n{min-width:18px;height:18px;background:#0f4a2a;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#34d399;flex-shrink:0;margin-top:1px}
+
+/* State Transitions */
+.st{background:#0a0d14;border:1px solid #1e2433;border-radius:6px;padding:8px 10px;margin-bottom:6px}
+.st-states{font-size:11px;font-weight:600;color:#e2e8f0;margin-bottom:3px}
+.st-from{color:#f87171}
+.st-to{color:#34d399}
+.st-cond{font-size:10px;color:#fbbf24;margin-bottom:2px}
+.st-impact{font-size:10px;color:#94a3b8}
+
 /* Search highlight */
 .nd.found rect{stroke:#fbbf24!important;stroke-width:2!important}
 

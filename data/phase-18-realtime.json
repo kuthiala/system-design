@@ -1,0 +1,377 @@
+{
+  "name": "Phase 18 · Real-time & Streaming",
+  "id": "realtime",
+  "icon": "⚡",
+  "phase": "Real-time",
+  "color": "#a855f7",
+  "sizes": [
+    "small",
+    "medium",
+    "large",
+    "hyper"
+  ],
+  "short": "Polling → WebSocket → SSE → custom protocols at edge — making your application feel alive",
+  "keyInsight": "Real-time is the difference between a 'page' and an 'experience.' When data arrives as it happens — a new message, a cursor moving, a stock price changing, a deployment completing — the application feels alive and responsive. Without real-time, users manually refresh and see stale data, workflows depend on 'did you see the email?' instead of live notifications, and collaboration requires taking turns instead of working simultaneously. But real-time infrastructure has fundamentally different scaling characteristics than request-response HTTP: instead of handling discrete requests and forgetting clients between them, you maintain persistent connections to every online user simultaneously. 10K concurrent connections is a single server; 1M concurrent connections is a distributed system with its own sharding, routing, and failure modes. The critical engineering question is: how many concurrent connections will you have at peak, and what's the fan-out pattern (1:1 like chat, 1:1000 like notifications, or 1:1M like a live sports score)?",
+  "mentalModel": "Think of the difference between a mailbox and a phone call. HTTP request-response is a mailbox: you send a letter (request), wait for a reply (response), get it sometime later. You have no idea if something has changed until you check the mailbox again (polling). WebSocket is a phone call: you establish a connection, and both parties can speak or listen at any time in real-time. The connection stays open as long as needed. The engineering cost: maintaining a mailbox for 1M users is trivial (the mailbox just sits there). Maintaining a phone call with 1M users simultaneously requires 1M active phone lines — each consuming memory, CPU, and a network socket on your server. This is why real-time infrastructure is qualitatively different from request-response infrastructure: the cost is proportional to concurrent users, not to requests per second.",
+  "detail": {
+    "what": "Real-time communication is the sub-second push of data from server to client (or between clients) without the client explicitly asking for it. It encompasses: (1) Server-push notifications: new message, deployment complete, price change — the server decides something happened and pushes it to interested clients. (2) Presence: who's online, who's typing, who's viewing this document — ephemeral state shared among connected users. (3) Collaborative editing: multiple users editing the same document/drawing/spreadsheet simultaneously, seeing each other's changes in real-time. (4) Live data: dashboards updating as metrics change, stock tickers, live sports scores. (5) Gaming: player positions, game state, voice chat. The underlying transports: HTTP long-polling (client opens request, server holds it open until data is available — works everywhere, expensive because each 'push' requires a new HTTP request), Server-Sent Events (SSE — one-way server-to-client push over HTTP, auto-reconnection built in, works with HTTP/2 multiplexing, simpler than WebSocket for one-way use cases), WebSocket (full-duplex bidirectional communication over a persistent TCP connection — the standard for two-way real-time), and WebTransport (HTTP/3/QUIC-based, eliminates TCP head-of-line blocking — the future for latency-sensitive applications like gaming, newer browser support).",
+    "why": "HTTP polling is the naive approach and it's both wasteful and slow. If you poll every 5 seconds, 95% of polls return 'no new data' — wasting server resources and bandwidth. And your latency floor is the polling interval: on average, users see new data 2.5 seconds late (half the 5-second interval). Reducing the interval to 1 second makes it 5× more expensive. Reducing to 100ms makes it 50× more expensive and starts overwhelming your API. WebSocket solves both problems: the server pushes data the instant it's available (<50ms), and no bandwidth is wasted on empty polls. But WebSocket introduces a fundamentally different operational model. Every connected user holds an open TCP connection — consuming memory (~10–50KB per connection including socket buffers, heartbeat timers, and application state), a file descriptor (Linux default ulimit is 1024 — you must raise it to 100K+ for real-time servers), and a slot in your load balancer's connection table. Scaling from 1K to 100K concurrent connections requires a single well-tuned server. Scaling from 100K to 1M requires connection sharding (distributing connections across multiple gateway nodes), a pub/sub backplane (routing messages between gateway nodes), and presence aggregation (tracking who's connected across all nodes). Scaling to 10M+ requires edge-local connection termination (WebSocket gateways at PoPs worldwide) and geographic routing of pub/sub messages.",
+    "numbers": "Connection resource consumption: each WebSocket connection costs ~10–50KB of server memory (8KB socket buffers + application state + heartbeat timer). At 1M connections: 10–50GB RAM just for connections, before any message processing. CPU: heartbeat processing (every 30s) for 1M connections = ~33K heartbeats/sec — trivial for a single core. Message fan-out is the real CPU concern: broadcasting to 100K subscribers requires 100K send() calls — about 0.5–2 seconds on a single core. Connection storms: when you deploy and restart your real-time server, all clients reconnect simultaneously. If 100K clients reconnect in 1 second, that's 100K TLS handshakes + auth checks + state restoration — this will crush your server without backoff. Standard mitigation: clients reconnect with random jitter (random delay between 0–5 seconds). Transport latency: WebSocket message delivery (server to client): <5ms within a region. SSE: similar latency, slightly more overhead per message. Long-polling: poll interval/2 average latency (2.5s for 5s poll). WebTransport: similar to WebSocket but without TCP head-of-line blocking — 20–40% lower jitter on lossy networks (mobile)."
+  },
+  "tradeoffs": [
+    {
+      "axis": "Latency vs Cost",
+      "left": "WebSocket: persistent connection, <5ms push, but memory cost per connection — scales with concurrent users, not requests",
+      "right": "Long-polling: no persistent connection, 1–5s push latency, but simpler infrastructure — scales like normal HTTP",
+      "pos": 0.7
+    },
+    {
+      "axis": "Push vs Pull",
+      "left": "Server push (WebSocket/SSE): complex server-side infrastructure, but instant delivery and zero wasted bandwidth",
+      "right": "Client poll: trivially simple (just an HTTP endpoint), but wasteful bandwidth and slow delivery",
+      "pos": 0.5
+    },
+    {
+      "axis": "Custom vs Managed",
+      "left": "Self-built real-time (Node.js + Redis pub/sub): full control, cheapest at scale, but significant engineering investment",
+      "right": "Managed (Pusher, Ably, Firebase): zero infrastructure, works in an afternoon, but $25–500/month and limited customization",
+      "pos": 0.5
+    }
+  ],
+  "pitfalls": [
+    {
+      "name": "Thundering herd reconnect",
+      "desc": "Your real-time server restarts (deploy, crash, scaling event). All 50K connected clients detect the disconnect and reconnect immediately — simultaneously. 50K TLS handshakes, 50K auth checks, 50K state restorations hit your server in 1 second. It collapses under the load, clients fail to reconnect, retry immediately, and you're in a crash loop. The fix is mandatory: clients must reconnect with jitter — a random delay between 0 and max_jitter (typically 1–5 seconds, proportional to connection count). Implementation: `reconnectDelay = Math.random() * 5000;`. Socket.IO does this automatically. For custom WebSocket: implement it in your client library. Additionally, implement connection rate limiting on the server: accept at most N new connections per second (N = your capacity / 5-second ramp)."
+    },
+    {
+      "name": "Sticky session complexity with deploys",
+      "desc": "WebSocket requires sticky sessions — a client's connection must stay on the same server for the duration. This means your load balancer can't freely distribute connections. During deploys: you can't just kill servers (active connections would drop). You must: (1) stop sending new connections to the old server (drain), (2) wait for existing connections to naturally disconnect or explicitly migrate them, (3) only then terminate the old server. This makes deploys slow (draining might take minutes). Solution: implement graceful connection migration — old server sends a 'please reconnect' message to clients, clients reconnect (with jitter) to the new server. Set a max drain time (60s) after which remaining connections are force-closed."
+    },
+    {
+      "name": "Backpressure ignored — OOM from slow clients",
+      "desc": "Your server sends messages to a client, but the client's network is slow (mobile on 3G). The outbound buffer for that connection grows as messages queue up faster than they're delivered. Without limits, one slow client can cause your server to OOM. Solution: per-connection outbound buffer limit (e.g., 1MB). When the buffer exceeds the limit, drop the connection — the client will reconnect and catch up from the last known state. This is a deliberate design choice: it's better to disconnect one slow client than to OOM and disconnect everyone."
+    },
+    {
+      "name": "Fan-out cost explosion for celebrity/broadcast patterns",
+      "desc": "A 'notification' goes to 1M subscribers (e.g., a popular streamer goes live). That's 1M individual WebSocket sends from your server. At ~1μs per send, that's 1 second of CPU for a single message. If this happens frequently, your real-time servers are CPU-saturated just doing fan-out. Solution: use a tiered fan-out architecture. Server publishes to a pub/sub backplane (Redis, NATS). Each gateway node subscribes only to topics relevant to its connected users. For extreme fan-out (>100K subscribers), switch to pull-on-read: instead of pushing to each subscriber, invalidate their cache and let them pull on their next heartbeat. Twitter uses this hybrid approach: fan-out-on-write for normal accounts (<100K followers), fan-out-on-read for celebrities (>100K followers)."
+    }
+  ],
+  "examples": [
+    {
+      "name": "Discord — Elixir/Erlang for millions of concurrent connections",
+      "desc": "Discord's real-time infrastructure is built on Elixir (running on the Erlang BEAM VM), which was designed for telecom-grade concurrency. Each Discord guild (server) is a single Erlang process that holds in-memory state (member list, channel metadata). Erlang processes are extremely lightweight (~2KB each), so a single BEAM node can run millions of processes. Cross-node communication uses Erlang's built-in distributed message passing. Discord handles 5M+ concurrent voice connections and tens of millions of message connections. The lesson: language/runtime choice matters enormously for real-time — Erlang/Elixir, Go, and Rust handle concurrent connections 10–100× more efficiently than Python or Ruby due to lightweight concurrency primitives."
+    },
+    {
+      "name": "Figma — custom CRDT for collaborative design",
+      "desc": "Figma's multiplayer editing uses a custom CRDT (Conflict-free Replicated Data Type) implemented in Rust (compiled to WebAssembly for the browser). When two designers move the same rectangle simultaneously, the CRDT merges both operations deterministically without a central server deciding the 'winner.' The result is the same on every client regardless of message ordering. Figma supports ~100 concurrent editors per file with sub-50ms latency for each operation. They chose CRDT over OT (Operational Transform, used by Google Docs) because CRDTs work without a central coordination server, enabling better peer-to-peer resilience and simpler server architecture."
+    },
+    {
+      "name": "Slack's flannel — edge caching for presence",
+      "desc": "Slack's 'flannel' service maintains a cached copy of workspace metadata (channels, members, presence) at every edge PoP. When a user opens Slack, the initial data load comes from the nearest edge — <50ms worldwide. Presence updates (user went online/offline, started/stopped typing) propagate through the edge cache network. This architecture lets Slack show presence for millions of simultaneous users without each check requiring a round-trip to a central server."
+    }
+  ],
+  "levelUp": [
+    {
+      "from": "small",
+      "to": "medium",
+      "trigger": "Polling interval <5s (getting expensive and still too slow) or building a feature that requires real-time updates (chat, notifications, collaborative editing)",
+      "action": "Adopt WebSocket or SSE. Here's the implementation path: (1) Choose transport: if your updates are one-way (server → client) — like notifications, live dashboards, feed updates — use Server-Sent Events (SSE). SSE is simpler than WebSocket: it's plain HTTP, works through all proxies/CDNs, auto-reconnects on disconnect, and works with HTTP/2 multiplexing. Implementation in Node.js: `res.writeHead(200, {'Content-Type': 'text/event-stream'}); res.write('data: {\"message\": \"hello\"}\\n\\n');`. Client-side: `const es = new EventSource('/events'); es.onmessage = (e) => console.log(e.data);`. If you need two-way (client ↔ server) — like chat, collaborative editing, gaming — use WebSocket. Socket.IO (Node.js) is the easiest starting point: built-in reconnection, fallback to long-polling, room/namespace abstractions. `io.on('connection', (socket) => { socket.on('message', (data) => { io.to(data.room).emit('message', data); }); });`. (2) Set up sticky sessions on your load balancer: ALB supports WebSocket natively (enable stickiness by target group). NGINX: `proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection 'upgrade';`. (3) Keep it simple: one server process handling connections + publishing + subscribing. Use Node.js (ws library for raw WebSocket, Socket.IO for batteries-included) or Go (gorilla/websocket — handles 100K+ connections per process easily). (4) Heartbeat: send a ping every 30 seconds to detect dead connections. Close connections that don't pong within 10 seconds. This prevents ghost connections from consuming memory indefinitely. For managed options: Pusher ($49/month for 100 concurrent connections, scales to millions, zero ops — excellent for startups), Ably (similar pricing, better global distribution), Supabase Realtime (free tier, Postgres-backed, good if you're already on Supabase)."
+    },
+    {
+      "from": "medium",
+      "to": "large",
+      "trigger": ">10K concurrent connections (single server approaching limits) or fan-out >1K subscribers per topic (single server can't broadcast fast enough)",
+      "action": "Build a dedicated real-time tier with a pub/sub backplane. (1) Separate the WebSocket gateway from your application servers. The gateway's only job is managing connections, authentication, and routing messages. Your application servers publish events to the backplane; the gateway subscribes and pushes to connected clients. This separation lets you scale connections (gateways) independently from compute (app servers). (2) Deploy a pub/sub backplane: Redis Pub/Sub is the simplest option (each gateway subscribes to relevant channels, messages are broadcast to all subscribers — strength: simplest setup, ~100K msg/s; weakness: at-most-once delivery, messages lost if no subscriber is listening). Redis Streams (ordered, persistent, consumer groups — strength: messages are durable, consumers can replay from any point, supports consumer groups for load distribution; weakness: more complex than pub/sub, ~50K msg/s). NATS (purpose-built for real-time messaging — strength: 1M+ msg/s, built-in clustering, JetStream for persistence; weakness: less common than Redis, smaller community). (3) Connection sharding: assign each user to a gateway node deterministically (hash(user_id) % num_gateways). This ensures that messages for a user always go to the same gateway. If a user has multiple devices, they might be on different gateways — the backplane bridges them. (4) Build a presence service: track which users are connected, to which gateway, in which rooms/channels. Store in Redis as a hash map (user_id → {gateway_node, connected_at, rooms: [...]}). When a user connects/disconnects, update the presence map and broadcast the change. This lets you answer 'who's online in this channel?' without querying every gateway. (5) Consider Centrifugo (open-source Go real-time messaging server with built-in Redis/NATS backplane, connection management, presence, history — a production-ready alternative to building your own)."
+    },
+    {
+      "from": "large",
+      "to": "hyper",
+      "trigger": ">1M concurrent connections or sub-100ms global push latency required",
+      "action": "Edge real-time infrastructure. (1) Deploy WebSocket gateways at edge PoPs worldwide (Cloudflare Durable Objects for stateful edge, or your own WebSocket servers in multiple regions behind anycast). Users connect to the nearest PoP — their connection latency is 5–30ms instead of 50–300ms for a centralized server. (2) Geo-routed pub/sub: when a message is published, it's first delivered to local subscribers (same PoP, <5ms), then replicated to other PoPs for their local subscribers (cross-region, 30–80ms). This gives local users instant delivery while global users get acceptable latency. (3) CRDT for collaborative state: if you have collaborative editing features, adopt CRDTs (Yjs is the leading open-source library — supports text, JSON, arrays, maps as mergeable data types). CRDTs eliminate the need for a central coordination server — each client and each edge node can independently accept writes and merge them deterministically. This means collaboration works even during network partitions. (4) WebTransport for latency-critical applications: WebTransport (over HTTP/3/QUIC) eliminates TCP's head-of-line blocking problem. In TCP, if one packet is lost, all subsequent packets are delayed until the lost one is retransmitted — even if they're independent messages. QUIC (UDP-based) allows independent streams, so a lost packet in stream A doesn't delay stream B. This reduces jitter by 20–40% on lossy mobile networks. Browser support: Chrome and Edge (2023+), Firefox (behind flag), Safari (not yet). (5) Hybrid fan-out: for topics with <1K subscribers, use push (fan-out-on-write). For topics with >1K subscribers (broadcast channels, popular events), use pull-on-invalidate (push a lightweight 'new data available' signal, client pulls full payload on next render). This prevents CPU exhaustion from massive fan-out. Technologies: Cloudflare Durable Objects (stateful edge compute — each 'object' is a single-threaded actor at an edge PoP, perfect for per-room/per-document real-time state), Liveblocks (managed collaborative infrastructure — handles presence, storage, and CRDT synchronization as a service), custom QUIC implementations (quic-go for Go, msquic for C++/Rust)."
+    }
+  ],
+  "children": [
+    {
+      "name": "Transport",
+      "id": "rt-transport",
+      "icon": "📡",
+      "phase": "Real-time",
+      "color": "#a855f7",
+      "sizes": [
+        "small",
+        "medium",
+        "large",
+        "hyper"
+      ],
+      "short": "Long-poll → SSE → WebSocket → WebTransport/QUIC — each transport has different tradeoffs in compatibility, latency, and complexity",
+      "keyInsight": "The transport choice is a tradeoff between universality and performance. Long-polling works literally everywhere (even behind the most restrictive corporate proxies) but is expensive and slow. SSE works everywhere HTTP works and is perfect for one-way server push. WebSocket is the standard for two-way communication but requires sticky sessions and special proxy/CDN configuration. WebTransport is the future (no head-of-line blocking, multiplexed streams) but has limited browser support. Most production systems use a layered approach: WebSocket as primary, SSE or long-polling as automatic fallback.",
+      "detail": {
+        "what": "The wire-level mechanism for maintaining a low-latency communication channel between client and server. Each transport has fundamentally different characteristics: (1) Long-polling: client sends an HTTP request, server holds it open until data is available (or timeout, typically 30s). Client immediately sends a new request. Each 'push' requires a full HTTP request-response cycle (headers, TLS overhead). Works through ALL proxies, firewalls, and CDNs — the universal fallback. Cost: ~2KB overhead per 'poll' cycle from HTTP headers alone. (2) Server-Sent Events (SSE): HTTP response with Content-Type: text/event-stream. Server writes events to the response stream; connection stays open. One-way only (server → client). Browser EventSource API has built-in auto-reconnect with last-event-ID (the browser automatically tells the server the last event it received, enabling seamless resume). Works with HTTP/2 multiplexing (many SSE streams over one TCP connection). Can't send data from client to server on the same connection. (3) WebSocket: starts as an HTTP Upgrade request, then switches to a persistent TCP connection with a thin framing protocol. Full-duplex (both directions simultaneously). Sub-frame overhead: 2–6 bytes per message (vs ~200–800 bytes for HTTP headers). Requires load balancer support for connection upgrade and sticky sessions. (4) WebTransport: built on HTTP/3 (QUIC over UDP). Supports multiplexed bidirectional streams without head-of-line blocking. If one stream's packet is lost, other streams continue unaffected (unlike TCP where one lost packet blocks everything). Also supports unreliable datagrams (useful for gaming, voice — low latency, accept packet loss). Newer: Chrome 97+ (2022), limited proxy/CDN support.",
+        "why": "The transport choice directly affects user experience, infrastructure cost, and operational complexity. SSE is underappreciated: for the very common pattern of 'server pushes updates to client' (notifications, feed updates, dashboard refreshes, deployment logs), SSE is simpler than WebSocket (no upgrade handshake, works through CDNs and proxies, auto-reconnect built into the browser API) and sufficient. WebSocket is necessary only when the client needs to send data back on the same connection (chat messages, collaborative editing commands, gaming input). Many applications that use WebSocket would be better served by SSE + regular HTTP POST for client-to-server messages — simpler infrastructure, better proxy compatibility, and the same user experience.",
+        "numbers": "Per-connection overhead: Long-polling = ~2KB per cycle (HTTP headers) × 2 cycles/minute = ~4KB/min/connection. SSE = one-time HTTP header (~500 bytes) + ~50 bytes per event. WebSocket = 6 bytes per frame + payload. WebTransport = similar to WebSocket per-stream. Latency: Long-polling = poll_interval/2 average (2.5s for 5s poll). SSE/WebSocket/WebTransport = <5ms within region. Scalability: Long-polling generates N requests/minute per client — at 100K clients × 12 polls/min = 1.2M req/min from polling alone. SSE/WebSocket = 1 connection per client, messages only when data exists — orders of magnitude less overhead. Browser support (2024): Long-polling = 100%. SSE = 97%+ (all modern browsers including IE11 with polyfill). WebSocket = 98%+ (universal). WebTransport = ~75% (Chrome, Edge, Firefox; no Safari yet)."
+      },
+      "tradeoffs": [
+        {
+          "axis": "Reliability vs Latency",
+          "left": "TCP (WebSocket): ordered delivery, guaranteed — but head-of-line blocking means one lost packet delays all subsequent data",
+          "right": "UDP/WebTransport: no head-of-line blocking, independent streams, lowest jitter — but must handle out-of-order delivery in application",
+          "pos": 0.5
+        }
+      ],
+      "sizes_cfg": {
+        "small": {
+          "range": "SSE for one-way push, WebSocket for two-way — or use a managed service",
+          "rec": "For notifications, live dashboards, feed updates, and deployment logs (server → client only): use Server-Sent Events (SSE). It's the simplest real-time transport. Server-side (Node.js): `res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' }); setInterval(() => res.write(`data: ${JSON.stringify(update)}\\n\\n`), 1000);`. Client-side: `const source = new EventSource('/updates'); source.onmessage = (e) => handleUpdate(JSON.parse(e.data));`. SSE handles reconnection automatically — if the connection drops, the browser reconnects and sends a Last-Event-ID header to resume from where it left off. For two-way communication (chat, collaborative editing): use Socket.IO (Node.js). It provides WebSocket with automatic fallback to long-polling, room/namespace management, and reconnection with backoff+jitter. Setup: `npm install socket.io` → `const io = require('socket.io')(server); io.on('connection', (socket) => { ... });`. Managed alternatives: Pusher (easiest integration — add a script tag, subscribe to channels, receive events; $49/month for 100 concurrent, scales to millions), Ably ($25/month for 6M messages, global edge network), Supabase Realtime (free tier, Postgres change notifications over WebSocket — excellent if you're on Supabase).",
+          "tools": [
+            "SSE (native)",
+            "Socket.IO",
+            "Pusher (managed)",
+            "Ably (managed)",
+            "Supabase Realtime"
+          ]
+        },
+        "medium": {
+          "range": "Native WebSocket with proper connection management",
+          "rec": "Graduate from Socket.IO to native WebSocket for more control and lower overhead. Socket.IO adds ~30KB to your client bundle and has protocol overhead; native WebSocket is leaner. Server: use the ws library (Node.js, ~3KB, handles 50K+ connections per process) or gorilla/websocket (Go, handles 100K+ connections per process — Go's goroutine model is ideal for concurrent connections). Key implementation details: (1) Heartbeat: send a ping frame every 30 seconds. If no pong within 10 seconds, consider the connection dead and close it. This prevents ghost connections from leaking memory. (2) Reconnection: client reconnects with exponential backoff + random jitter: `delay = min(base × 2^attempt, max_delay) + random(0, jitter)`. Typical: base=500ms, max=30s, jitter=1s. This prevents thundering herd on server restart. (3) Authentication: authenticate on the initial HTTP Upgrade request (validate JWT/session cookie). Don't allow unauthenticated WebSocket connections — they're a DoS vector. (4) Message format: JSON is fine for most cases. If bandwidth is a concern (mobile, high message rate), use MessagePack (30–50% smaller than JSON, faster to parse) or Protobuf (smallest, fastest, but requires schema management). Technology comparison: Node.js ws (battle-tested, large community, ~50K connections per process — limited by V8 single-thread event loop). Go gorilla/websocket (100K+ connections per process due to goroutines, but gorilla is now archived — consider nhooyr.io/websocket as maintained alternative). Phoenix Channels (Elixir — the Rolls Royce of real-time: built on Erlang VM which was literally designed for millions of concurrent connections, built-in presence tracking, topic-based pub/sub — strength: handles 2M+ connections per node, supervision trees auto-restart crashed handlers; weakness: Elixir is a niche language, smaller hiring pool). Ably (managed, global edge network, 99.999% uptime SLA — strength: no ops, excellent global distribution; weakness: expensive at scale, vendor lock-in).",
+          "tools": [
+            "ws (Node.js)",
+            "gorilla/websocket → nhooyr.io/websocket (Go)",
+            "Phoenix Channels (Elixir)",
+            "Ably (managed)"
+          ]
+        },
+        "large": {
+          "range": "WebSocket with sharded gateway tier and pub/sub backplane",
+          "rec": "At >10K connections, you need multiple gateway nodes. The architecture: client ↔ WebSocket Gateway (manages connections) ↔ Pub/Sub Backplane (routes messages) ↔ Application Servers (produce events). (1) Connection sharding: deterministically assign each user to a gateway node using consistent hashing: `gateway = gateways[hash(user_id) % len(gateways)]`. The load balancer routes the user's WebSocket upgrade to that specific gateway. If a user has multiple devices, each device might hit a different gateway — the backplane ensures messages reach all devices. (2) Dedicated gateway tier: use Centrifugo (open-source Go real-time server — handles connection management, authentication, pub/sub routing, presence, message history, and Redis/NATS/Kafka backplane integration out of the box — strength: production-ready, handles 100K+ connections per node, well-documented; weakness: less customizable than building your own). Or SocketCluster (Node.js, built-in clustering across multiple processes/machines). (3) Backplane: Redis Pub/Sub for simplicity (<100K msg/s), NATS for performance (1M+ msg/s, purpose-built for messaging, JetStream for durability). Each gateway subscribes to channels relevant to its connected users. When an app server publishes 'new message in room X', the backplane delivers it to all gateways that have users in room X, and each gateway pushes to its local connected users. (4) Presence service: maintain a distributed presence map in Redis: `HSET presence:room:42 user:7 '{\"gateway\":\"gw-3\",\"since\":1700000000}'`. When displaying 'who's online,' query this map instead of polling all gateways. Set TTL on presence entries (60s) and refresh on heartbeat — stale entries auto-expire if a gateway crashes.",
+          "tools": [
+            "Centrifugo",
+            "SocketCluster",
+            "NATS",
+            "Redis Pub/Sub",
+            "Cloudflare Pub/Sub"
+          ]
+        },
+        "hyper": {
+          "range": "WebTransport / custom QUIC — the future of real-time",
+          "rec": "At >1M concurrent connections with global latency requirements, TCP-based WebSocket shows its limitations: head-of-line blocking causes jitter spikes on lossy networks (mobile), and TCP's connection-oriented nature makes migration between edge nodes difficult. WebTransport (HTTP/3 over QUIC) solves both: (1) No head-of-line blocking: QUIC multiplexes independent streams over UDP. A lost packet in the chat stream doesn't block the presence stream. This reduces p99 latency jitter by 20–40% on mobile networks. (2) Connection migration: QUIC connections are identified by a connection ID, not by source IP — so when a mobile user switches from WiFi to cellular, the connection migrates seamlessly without reconnecting. (3) Unreliable datagrams: for use cases where low latency matters more than guaranteed delivery (gaming position updates, voice audio), QUIC supports unreliable datagrams — fire-and-forget packets that skip retransmission. Server: quic-go (Go implementation, mature), msquic (Microsoft, C — used in Windows internally). Client: browser WebTransport API (Chrome 97+). For edge termination: Cloudflare Durable Objects provide stateful actors at edge PoPs — each 'room' or 'document' can be a Durable Object that holds state in memory at a single edge location, with clients connecting to the nearest PoP and being routed to the DO's location. This gives you <50ms latency for state operations worldwide without managing your own edge infrastructure. For native apps (gaming, voice): custom QUIC with Multipath QUIC (MPQUIC) — maintains connections over multiple network paths (WiFi + cellular) simultaneously, seamlessly handing off between them. This eliminates the disconnect-reconnect cycle that plagues mobile real-time apps.",
+          "tools": [
+            "WebTransport (browsers)",
+            "quic-go",
+            "msquic",
+            "Cloudflare Durable Objects",
+            "Multipath QUIC"
+          ]
+        }
+      },
+      "levelUp": [],
+      "formulas": [
+        {
+          "name": "Memory per connection",
+          "expr": "mem_per_conn ≈ socket_buffers (~8KB) + TLS_state (~5KB) + app_state (varies, 1–10KB) + heartbeat_timer (~1KB)",
+          "note": "Realistic total: 15–50KB per connection. At 100K connections: 1.5–5GB. At 1M connections: 15–50GB. Plan your gateway node's RAM accordingly — an r6g.xlarge (32GB RAM) comfortably handles 200K–500K connections."
+        },
+        {
+          "name": "Fan-out cost",
+          "expr": "messages_per_sec = publish_rate × avg_subscribers_per_topic",
+          "note": "A chat room with 50 members and 2 messages/sec = 100 deliveries/sec (trivial). A 'trending' notification to 1M subscribers = 1M deliveries from one publish (requires sharded fan-out, ~1 second wall time on a single gateway)."
+        },
+        {
+          "name": "Backplane throughput requirement",
+          "expr": "backplane_msgs_per_sec = publishes_per_sec × avg_gateway_nodes_per_topic",
+          "note": "If 10K publishes/sec and each topic has subscribers on 5 gateway nodes, backplane must handle 50K msg/s. Redis Pub/Sub handles ~100K msg/s; NATS handles 1M+."
+        }
+      ],
+      "pitfalls": [
+        {
+          "name": "Sticky session leak on deploy",
+          "desc": "WebSocket requires sticky load balancing. During rolling deploys, old instances must drain connections before terminating. If drain time is too short, connections are force-closed — users see disconnects. If drain time is too long, deploys take forever. Solution: implement graceful migration — old instance sends a 'reconnect' message to all clients, clients reconnect with jitter to new instances, old instance waits until all connections are migrated (max 60s), then terminates."
+        },
+        {
+          "name": "Thundering herd reconnect",
+          "desc": "Server restart → all clients reconnect simultaneously → server crashes again. The fix: reconnect with random jitter. In your client code: `reconnectDelay = Math.min(1000 * 2^attempt, 30000) + Math.random() * 5000`. The random jitter (0–5s) spreads reconnections across a 5-second window. Combined with server-side connection rate limiting (accept max N new connections per second), this prevents cascading failures."
+        },
+        {
+          "name": "Backpressure ignored — OOM from slow clients",
+          "desc": "Server sends messages to a client on a slow network (mobile 3G). The per-connection outbound buffer grows as messages accumulate faster than they're sent. Without a limit, a handful of slow clients can cause the server to OOM, killing connections for everyone. Solution: per-connection outbound buffer limit (typically 256KB–1MB). When exceeded, close the connection with a 'buffer overflow' close code. The client reconnects and catches up via message history. ws (Node.js): `ws.bufferedAmount` check before sending. Go: use a buffered channel as write queue with select/timeout."
+        }
+      ],
+      "related": [
+        {
+          "id": "compute-lb",
+          "label": "Load Balancing"
+        },
+        {
+          "id": "msg-pattern",
+          "label": "Async Pattern"
+        }
+      ],
+      "children": []
+    },
+    {
+      "name": "Pub/Sub Backplane",
+      "id": "rt-pubsub",
+      "icon": "📢",
+      "phase": "Real-time",
+      "color": "#a855f7",
+      "sizes": [
+        "medium",
+        "large",
+        "hyper"
+      ],
+      "short": "Redis pub/sub → NATS → custom routing fabric — the nervous system connecting your gateway nodes",
+      "keyInsight": "When you have multiple WebSocket gateway nodes (because one can't handle all connections), the pub/sub backplane solves the routing problem: user A is connected to Gateway 1, user B is connected to Gateway 2, and user A sends user B a message. The backplane ensures the message reaches Gateway 2. Without it, each gateway is an island — messages only reach users on the same node. The choice of backplane technology determines your message delivery guarantees (at-most-once vs at-least-once), throughput ceiling, and latency floor.",
+      "detail": {
+        "what": "The internal message routing fabric that connects multiple real-time gateway nodes, ensuring messages published by any producer reach all interested subscribers regardless of which gateway they're connected to. Three patterns: (1) Broadcast (Redis Pub/Sub, NATS core): every message goes to every gateway. Each gateway filters locally for relevant subscriptions. Simple, but wasteful at scale (gateways process messages for users they don't have). (2) Topic-routed (NATS with subject hierarchy, Kafka topics): messages are published to specific topics (e.g., `room.42.messages`), and gateways subscribe only to topics for their connected users. More efficient — gateways only receive relevant messages. (3) Direct-routed (custom): the publisher knows which gateway(s) have the target user (via a presence/routing table) and sends directly to those gateways. Most efficient — zero wasted delivery — but requires maintaining an accurate routing table.",
+        "why": "Without a backplane, each gateway is a silo. If you have 10 gateway nodes and a user sends a chat message, only users connected to the same gateway see it — 90% of the room misses the message. The backplane bridges this gap. The choice of backplane technology has massive implications: Redis Pub/Sub is simplest but at-most-once (if a gateway is temporarily disconnected, it misses messages — no replay). NATS is faster and supports both at-most-once (core NATS) and at-least-once (JetStream). Kafka is durable and replayable but adds 10–50ms latency and significant operational complexity — usually overkill for real-time push. For most real-time applications, at-most-once is acceptable because (1) the user refreshes or reconnects and catches up, and (2) critical messages (order confirmations, payment notifications) should go through a reliable async channel (SQS, Kafka) anyway, not just the real-time push.",
+        "numbers": "Redis Pub/Sub: ~100K messages/sec per Redis instance, at-most-once delivery, no persistence, no replay. Messages are lost if no subscriber is listening. Latency: <1ms within the same datacenter. Redis Streams: ~50K–100K messages/sec, at-least-once, persistent, consumer groups for fan-out, replay from any point. Latency: 1–5ms. NATS Core: 1M+ messages/sec, at-most-once, no persistence. Lowest latency: ~200μs within datacenter. NATS JetStream: 500K+ messages/sec, at-least-once, persistent, replay. Latency: 1–3ms. Kafka: 100K–1M messages/sec, at-least-once (exactly-once with idempotent producer), durable, replay from any offset. Latency: 5–50ms (higher due to batching and replication). For real-time push where <10ms latency matters, Kafka is usually too slow. Redis Pub/Sub or NATS Core are the right choices."
+      },
+      "tradeoffs": [
+        {
+          "axis": "Latency vs Durability",
+          "left": "Redis Pub/Sub / NATS Core: <1ms delivery, but messages lost if no subscriber is listening — fire-and-forget",
+          "right": "Kafka / NATS JetStream: durable, replayable, but 5–50ms added latency — persistent log",
+          "pos": 0.5
+        }
+      ],
+      "sizes_cfg": {
+        "medium": {
+          "range": "Redis Pub/Sub — simplest backplane for 2–10 gateway nodes",
+          "rec": "A single Redis instance running Pub/Sub. Each gateway subscribes to channels relevant to its connected users (e.g., `SUBSCRIBE room:42 room:43 user:notifications:7`). When your application server publishes an event (`PUBLISH room:42 '{\"type\":\"message\",\"text\":\"hello\"}'`), Redis delivers it to all subscribed gateways. Those gateways then push to their local connected users. This works beautifully up to ~100K messages/sec and ~10 gateway nodes. Limitations: at-most-once delivery (if a gateway reconnects to Redis, it misses messages during the reconnect window — typically <1s); no message history (new subscribers can't see past messages). For message history: complement with Redis Streams or a separate 'recent messages' query endpoint. Alternative: Redis Streams (XADD/XREAD with consumer groups) gives you at-least-once delivery and replay capability at the cost of slightly more complex client code. Use Streams if you need: clients to catch up after reconnection, message deduplication (each message has a unique stream ID), or consumer groups (multiple worker processes consuming the same stream).",
+          "tools": [
+            "Redis Pub/Sub",
+            "Redis Streams"
+          ]
+        },
+        "large": {
+          "range": "NATS or Redis Streams — for higher throughput and delivery guarantees",
+          "rec": "NATS is purpose-built for this problem. Core NATS: at-most-once, 1M+ msg/s, sub-millisecond latency, built-in clustering (just connect 3 NATS servers and they auto-form a cluster). Subject hierarchy enables topic routing: `room.42.messages`, `user.7.notifications`, `system.announcements` — gateways subscribe to patterns like `room.42.*` to get all events for room 42. JetStream (NATS's persistence layer): at-least-once, replay from any sequence number, consumer groups. Use JetStream for critical notifications (payment received, deployment failed) that must not be lost; use core NATS for ephemeral events (typing indicators, cursor positions, online status). Architecture at this tier: (1) NATS cluster (3–5 nodes for HA). (2) Application servers publish events to NATS subjects. (3) Each WebSocket gateway subscribes to subjects matching its connected users. (4) Gateway pushes to local clients. (5) For history: JetStream stores the last N messages per subject, enabling 'catch up on reconnect.' Technology comparison: NATS (lowest latency, simplest operations, built for real-time messaging — the purpose-built choice for this use case). Redis Streams (good if you already run Redis — avoids adding a new technology to your stack; weakness: not as fast or scalable as NATS for pure pub/sub). Kafka (too slow for real-time push, 5–50ms added latency from batching — use Kafka for durable event streaming to backend systems, not for user-facing real-time).",
+          "tools": [
+            "NATS",
+            "NATS JetStream",
+            "Redis Streams",
+            "Centrifugo (integrates with all of these)"
+          ]
+        },
+        "hyper": {
+          "range": "Custom routing mesh — when off-the-shelf backplanes hit limits",
+          "rec": "At >1M concurrent connections across 100+ gateway nodes globally, broadcast-style pub/sub wastes bandwidth (every gateway receives every message). Build a direct-routing mesh: (1) Maintain a global routing table mapping user_id → gateway_node_id (stored in Redis or a distributed hash table). (2) When publishing a message to user X, look up which gateway has user X connected and send directly to that gateway — no broadcast, no wasted delivery. (3) For room/channel messages, maintain a membership table (room_id → list of user_ids → list of gateway_nodes) and fan out only to relevant gateways. (4) Geo-aware routing: prefer delivering to gateways in the same region first (local subscribers get <5ms delivery), then replicate to other regions for their local subscribers (30–80ms). (5) Hybrid push/pull for high fan-out: for topics with <1K subscribers, push. For topics with >1K subscribers (broadcast channels, celebrity followers), invalidate and let subscribers pull — avoids 1M-write fan-out spikes. Real-world examples: Discord uses Erlang's built-in distributed message passing between BEAM nodes — each guild is a process, messages route directly to the process. Slack's 'flannel' caches channel metadata at every PoP and uses a custom pub/sub mesh for presence updates. Twitter's real-time pipeline (now X) processes 500K+ tweets/sec with a custom routing fabric that fans out to connected streaming API consumers.",
+          "tools": [
+            "Custom routing mesh",
+            "Discord's Elixir/Erlang model",
+            "Slack's flannel",
+            "custom geo-routed pub/sub"
+          ]
+        }
+      },
+      "levelUp": [],
+      "examples": [
+        {
+          "name": "Discord (Elixir/Erlang)",
+          "desc": "Each Discord guild (server) is a single Erlang process ('GenServer') that holds guild state in memory. When a user sends a message, it goes to the guild process, which broadcasts to all connected members' gateway processes. Cross-node routing uses Erlang's built-in distributed message passing — the VM handles routing, failover, and process discovery. At 5M+ concurrent voice users and 200M+ message users, this architecture handles more concurrent real-time connections than almost any other consumer application."
+        },
+        {
+          "name": "Slack's flannel — edge caching for presence",
+          "desc": "Flannel is Slack's edge caching layer that maintains a copy of workspace metadata (channels, members, read states, presence) at every edge PoP. When a user opens Slack, the initial load comes from the nearest flannel cache — sub-50ms worldwide. Presence updates ('user is typing,' 'user is online') propagate through the flannel network. This avoids the need for every presence check to round-trip to a central server — at Slack's scale (millions of simultaneous users), that would require a server cluster dedicated just to presence."
+        }
+      ],
+      "related": [
+        {
+          "id": "msg-pattern",
+          "label": "Messaging & Async"
+        }
+      ],
+      "children": []
+    },
+    {
+      "name": "Collaborative State",
+      "id": "rt-collab",
+      "icon": "👥",
+      "phase": "Real-time",
+      "color": "#a855f7",
+      "sizes": [
+        "medium",
+        "large",
+        "hyper"
+      ],
+      "short": "Last-write-wins → OT → CRDT — the algorithms that make 'multiplayer' software possible",
+      "keyInsight": "When two users edit the same document simultaneously, their edits will conflict. User A types 'Hello' at position 5 while User B deletes characters 3–7. If you naively apply both operations, the result is garbage. The merge strategy determines whether collaborative editing feels magical (Google Docs) or frustrating (email attachments back and forth). Two dominant algorithms exist: Operational Transform (OT, used by Google Docs) requires a central server to order and transform operations — simpler for the server author, but the server is a single point of failure and a latency bottleneck. CRDTs (Conflict-free Replicated Data Types, used by Figma) use mathematical properties to merge operations in any order on any node and converge to the same result — no central server needed, works offline, but generates more metadata and is harder to implement.",
+      "mentalModel": "Imagine two people editing the same whiteboard from different rooms, connected by video. OT is like having a referee: each person describes their edit ('I drew a circle at position X'), the referee transforms conflicting edits ('Person A's circle at position 5 needs to shift to position 6 because Person B inserted text before it'), and both whiteboards converge. The referee (server) must see every edit and transform it — if the referee goes offline, editing stops. CRDT is like giving each person a special kind of whiteboard where any sequence of operations in any order always produces the same final result — like painting with additive colors where the order doesn't matter because the physics guarantees convergence. No referee needed, but the whiteboard is more complex (it tracks the 'identity' of each brushstroke so it can merge deterministically).",
+      "detail": {
+        "what": "Algorithms for merging concurrent edits to shared state (text documents, drawings, spreadsheets, presentations) without coordination and without conflicts. The core challenge: when User A inserts character 'X' at position 5 and User B simultaneously deletes character at position 4, the operations were created against the same initial state but the state has diverged. Applying A's operation on B's state (where position 5 is now position 4 because of the deletion) would insert 'X' in the wrong place. (1) Operational Transform (OT): transforms each operation against all concurrent operations before applying. The transform function adjusts positions: 'insert at 5 after a delete at 4 → insert at 4.' The server acts as a central sequencer: it assigns a total order to operations and transforms each one against all preceding concurrent operations. Used by Google Docs (the most battle-tested implementation), ShareDB, and Firepad. Strength: well-understood, proven at scale, compact wire format. Weakness: server-dependent (offline editing is limited), complex transform functions (N operation types require N² transform functions), hard to implement correctly (Google's OT paper is notoriously subtle). (2) CRDTs (Conflict-free Replicated Data Types): data structures designed so that all concurrent operations commute — applying them in any order yields the same result. Each edit is tagged with a globally unique, totally ordered ID (based on a logical clock). Insertions reference the item they're placed after by ID, not by position — so position shifts don't cause conflicts. Used by Figma, Notion (partially), Apple Notes, and many modern collaborative tools. Libraries: Yjs (most popular, JavaScript/TypeScript, supports text/JSON/arrays/maps, ~30KB bundle), Automerge (Rust core with JS bindings, more academic rigor, larger bundle). Strength: works offline and P2P (no central server required), simpler reasoning about correctness (if the CRDT is correct, merging is always correct). Weakness: metadata overhead (each character carries a unique ID, increasing document size by ~10–30%), garbage collection needed to bound growth.",
+        "why": "Without a merge algorithm, collaborative editing degenerates into 'last writer wins' — whoever saves last overwrites everyone else's changes. This is the experience of editing a shared Google Drive file with auto-sync off: save conflicts, lost work, frustration. Real-time collaboration that 'just works' is the difference between a single-player tool and a multiplayer platform. It's now table stakes for any document/design/code editing product. Figma's collaborative editing is their most cited competitive advantage over Sketch (single-player). Google Docs defeated Microsoft Word Online largely through superior real-time collaboration (Google had a 5-year head start with OT). Notion's block-based collaboration is what makes it a team tool rather than a personal wiki. The choice between OT and CRDT has real architectural consequences: OT requires a central server (simpler infrastructure, but server is SPOF and adds latency — server round-trip required before edit is visible to collaborators). CRDT works peer-to-peer (more complex data structure, but local edits are instant and merging happens in the background — better UX on slow connections).",
+        "numbers": "Metadata overhead: OT operations are compact (operation type + position + content, ~20–50 bytes each). CRDT per-character metadata: Yjs uses ~10–15 bytes per character (unique ID + parent reference + content). For a 10,000-character document, Yjs state is ~150KB vs ~40KB for plain text — 3.75× overhead. This is manageable for documents but can be significant for large datasets. Garbage collection: Yjs supports 'snapshots' that compact the history, reducing state size to ~1.2× plain text. Latency: OT with central server: edit → server → other clients = server RTT (10–50ms within region, 80–200ms cross-region). CRDT without server: edit → local apply (instant) → background sync to peers (whenever network allows). Concurrent editor limits: Google Docs (OT): ~100 concurrent editors per document. Figma (CRDT): ~100 concurrent editors per file. Limits are usually UI-driven (screen gets cluttered), not algorithmic."
+      },
+      "tradeoffs": [
+        {
+          "axis": "OT vs CRDT",
+          "left": "OT: smaller wire format, server is source of truth (simpler reasoning), but requires always-on central server and adds latency to collaboration",
+          "right": "CRDT: works offline/P2P, instant local edits, but larger metadata (10–30% overhead) and more complex data structures",
+          "pos": 0.6
+        }
+      ],
+      "sizes_cfg": {
+        "medium": {
+          "range": "Single-region, server-authoritative collaboration — Yjs or ShareDB",
+          "rec": "For most collaborative features (document editing, whiteboard, shared to-do lists): use Yjs. It's the most popular CRDT library, battle-tested in hundreds of production applications, and has excellent ecosystem support. Setup: (1) Install: `npm install yjs y-websocket`. (2) Server: run the y-websocket server (`npx y-websocket`), which manages document rooms and syncs state between clients. (3) Client: create a Y.Doc, connect to the server, bind to your editor. Yjs has bindings for: ProseMirror/TipTap (rich text), Monaco (code editor), CodeMirror, Quill, and many more. A full collaborative text editor can be built in <100 lines of code. For OT (if you prefer server-authoritative): ShareDB (Node.js, backed by MongoDB — well-tested, used by Concord and others). The server maintains the canonical document state and transforms operations. Simpler to reason about correctness but requires the server to be available for editing. Technology comparison: Yjs (CRDT, most popular, lightest memory footprint among CRDT libs, excellent editor integrations — strength: works offline, P2P-capable, huge community; weakness: understanding the underlying CRDT model has a learning curve). Automerge (CRDT, more academic rigor, Rust core — strength: richer data model including counters and nested objects; weakness: larger bundle size ~200KB vs Yjs ~30KB, fewer editor integrations). Liveblocks (managed service — handles presence, storage, and conflict resolution — strength: zero infrastructure, great React hooks; weakness: vendor lock-in, $25–100/month+). ShareDB (OT — strength: server-authoritative, MongoDB-backed, simpler mental model; weakness: requires always-on server, more complex for offline support).",
+          "tools": [
+            "Yjs",
+            "Automerge",
+            "ShareDB",
+            "Liveblocks (managed)"
+          ]
+        },
+        "large": {
+          "range": "Sharded document servers with presence and awareness",
+          "rec": "At scale, you need to handle thousands of simultaneous collaborative sessions, each in its own 'room.' Architecture: (1) Shard by document ID: each document's collaboration room runs on one server, determined by consistent hashing of document_id. This gives you locality (all edits for one document go to one server) and horizontal scaling (add more servers as document count grows). (2) Use Hocuspocus (the production-grade Yjs server — handles persistence, authentication, authorization, hooks for custom logic, Redis for multi-server awareness). Or scale y-websocket behind a load balancer with sticky sessions keyed on document_id. (3) Separate awareness from document state: 'awareness' data (cursor positions, selection ranges, user avatars, typing indicators) is ephemeral and high-frequency. Don't persist it — keep it in memory only, broadcast via the same WebSocket but on a separate channel. (4) Persistence: save the Yjs document state to your database periodically (every 5 seconds or on every edit, depending on durability requirements). Yjs documents are binary blobs (Y.encodeStateAsUpdate) — store as a BLOB in Postgres or in S3. On room open, load the blob and apply it to a fresh Y.Doc. (5) Scaling awareness to many viewers: if a document has 1000 viewers but only 5 editors, you don't need all 1000 on the same collaboration server. Serve read-only viewers from a CDN-cached version updated every few seconds; only active editors maintain WebSocket connections.",
+          "tools": [
+            "Hocuspocus (production Yjs server)",
+            "Yjs y-websocket",
+            "Liveblocks",
+            "custom OT server"
+          ]
+        },
+        "hyper": {
+          "range": "Edge-based CRDT with local-first architecture",
+          "rec": "At global scale with sub-100ms collaboration latency everywhere, the traditional 'connect to a central server' model fails — cross-continent server round-trips add 80–200ms per edit, making collaboration feel sluggish. The solution: edge-local CRDT state. (1) Cloudflare Durable Objects: each document's collaboration state lives in a Durable Object at a single edge PoP (the PoP nearest to the document's most active editor). Clients connect to their nearest PoP and are routed to the DO. Edits from nearby users apply instantly; edits from distant users arrive via PoP-to-PoP relay (~30–80ms). (2) Local-first architecture: each client holds a full copy of the document (CRDT state) locally. Edits apply instantly to the local copy (0ms latency — the best possible UX). Syncing with the server/peers happens in the background. If the network goes down, the user keeps editing — changes merge when connectivity returns. Yjs supports this out of the box. (3) Multi-region CRDT replication: document state is replicated across regions. Each region accepts local edits and merges with other regions asynchronously. CRDTs guarantee convergence regardless of merge order, so this is mathematically safe. The UX: edits are always instant (applied locally first), and cross-region merges are invisible (they just appear as 'remote user made a change'). Technologies: Cloudflare Durable Objects ($0.15/million requests + $0.20/GB-month storage — stateful edge compute, ideal for per-document CRDT state). Liveblocks Enterprise (managed collaborative infrastructure with edge presence). Custom CRDT + edge storage (most flexible, most engineering effort — build Yjs sync on your own edge network).",
+          "tools": [
+            "Cloudflare Durable Objects",
+            "Liveblocks Enterprise",
+            "custom CRDT + edge storage"
+          ]
+        }
+      },
+      "levelUp": [],
+      "pitfalls": [
+        {
+          "name": "CRDT bloat over time",
+          "desc": "CRDTs are append-only by nature — every operation is recorded in the history. A document edited 10,000 times accumulates 10,000 operations in its state, even if the current content is only 1,000 characters. Without compaction, document state grows without bound. Solution: Yjs supports periodic 'snapshots' that compact the document state, discarding tombstones (records of deleted items) and merging the history into a single state. Run compaction when document state exceeds 10× the content size. Automerge has similar compaction support."
+        },
+        {
+          "name": "Awareness data leakage",
+          "desc": "Persisting cursor positions, selection ranges, and typing indicators to the database wastes storage and creates privacy issues (users might not expect their exact cursor position to be stored indefinitely). Keep awareness data in memory only — it's ephemeral by nature. When a user disconnects, their awareness data should disappear within seconds. Yjs's awareness protocol handles this correctly by default."
+        },
+        {
+          "name": "Conflict resolution surprising users",
+          "desc": "CRDTs resolve conflicts deterministically, but the resolution might not match user intent. Example: two users simultaneously change the same word — User A changes 'cat' to 'dog,' User B changes 'cat' to 'bird.' A character-level CRDT might produce 'dbird' or 'bogd' depending on character IDs. This is 'correct' by CRDT math but confusing to users. Mitigation: use higher-level conflict resolution (word-level or block-level operations), or highlight conflicting regions for manual resolution."
+        }
+      ],
+      "examples": [
+        {
+          "name": "Figma multiplayer — custom CRDT in Rust",
+          "desc": "Figma built a custom CRDT specifically designed for vector graphics operations (move, resize, recolor, group/ungroup). Their CRDT is implemented in Rust (compiled to WebAssembly for the browser client and running natively on the server). It supports ~100 concurrent editors per file with sub-50ms operation latency. Key design choice: operations are at the object level (move rectangle X to position Y), not the byte level — this produces much more intuitive merge results than character-level CRDTs because graphic operations are naturally commutative (moving and recoloring the same rectangle in either order produces the same final state)."
+        },
+        {
+          "name": "Notion blocks — hybrid merge strategy",
+          "desc": "Notion uses a hybrid approach: block content (text within a block) uses OT-like conflict resolution with the server as sequencer. Block properties (color, type, toggle state) use CRDT-like last-writer-wins. Comments are append-only (no merge needed — all comments are preserved). Block ordering uses a fractional indexing scheme that allows insertion between blocks without reindexing. This hybrid approach lets Notion optimize each data type for its specific access pattern rather than forcing everything through a single merge algorithm."
+        }
+      ],
+      "related": [
+        {
+          "id": "req-consist",
+          "label": "Consistency Model"
+        }
+      ],
+      "children": []
+    }
+  ]
+}
