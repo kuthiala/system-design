@@ -712,9 +712,21 @@ document.getElementById("search").oninput = function () {
 // ══════════════════════════════════════════════════════════════
 
 (function initPanelResize() {
-  const dp     = document.getElementById("dp");
-  const handle = document.getElementById("dp-resize");
+  const dp      = document.getElementById("dp");
+  const handle  = document.getElementById("dp-resize");
+  const sidebar = document.getElementById("sidebar");
+  // Toggle button is 32px wide and must stay visible when sidebar is collapsed
+  const TOGGLE_BTN_W = 40;
   let startX, startW, dragging = false;
+
+  function getMaxPanelWidth() {
+    const sidebarW = sidebar.classList.contains("collapsed") ? TOGGLE_BTN_W : sidebar.offsetWidth;
+    return window.innerWidth - sidebarW;
+  }
+
+  function clampWidth(w) {
+    return Math.min(Math.max(w, 280), getMaxPanelWidth());
+  }
 
   // Pointer Events API for full touch/mouse/stylus support
   const onPointerDown = e => {
@@ -729,10 +741,8 @@ document.getElementById("search").oninput = function () {
 
       const onPointerMove = ev => {
         if (!dragging) return;
-        const clientX = ev.clientX;
-        const delta = startX - clientX;
-        const newW  = Math.min(Math.max(startW + delta, 280), window.innerWidth * 0.9);
-        dp.style.width = newW + "px";
+        const delta = startX - ev.clientX;
+        dp.style.width = clampWidth(startW + delta) + "px";
       };
 
       const onPointerUp = ev => {
@@ -766,10 +776,7 @@ document.getElementById("search").oninput = function () {
       document.body.style.userSelect = "none";
 
       const onMove = e => {
-        const clientX = e.clientX;
-        const delta = startX - clientX;
-        const newW  = Math.min(Math.max(startW + delta, 280), window.innerWidth * 0.9);
-        dp.style.width = newW + "px";
+        dp.style.width = clampWidth(startW + (startX - e.clientX)) + "px";
       };
 
       const onUp = () => {
@@ -795,9 +802,7 @@ document.getElementById("search").oninput = function () {
 
       const onMove = e => {
         const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-        const delta = startX - clientX;
-        const newW  = Math.min(Math.max(startW + delta, 280), window.innerWidth * 0.9);
-        dp.style.width = newW + "px";
+        dp.style.width = clampWidth(startW + (startX - clientX)) + "px";
       };
 
       const onUp = () => {

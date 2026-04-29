@@ -100,16 +100,16 @@ html,body{height:100%;overflow:hidden;background:#080b14;font-family:'Segoe UI',
 #breadcrumb{position:absolute;top:12px;left:16px;font-size:11px;color:#475569;max-width:60%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #hint{position:absolute;bottom:16px;left:16px;font-size:10px;color:#334155}
 /* DETAIL PANEL */
-#dp{width:700px;background:#0d1117;border-left:1px solid #1e2433;display:flex;flex-direction:column;transform:translateX(100%);transition:transform .22s ease;overflow:hidden;position:absolute;right:0;top:0;height:100%;min-width:280px;max-width:90vw;z-index:200}
+#dp{width:700px;background:#0d1117;border-left:1px solid #1e2433;display:flex;flex-direction:column;transform:translateX(100%);transition:transform .22s ease;overflow:hidden;position:absolute;right:0;top:0;height:100%;min-width:280px;z-index:200}
 #dp.open{transform:translateX(0)}
-#dp-resize{position:absolute;left:0;top:0;width:24px;height:100%;cursor:col-resize;z-index:20;background:transparent;touch-action:none}
-#dp-resize:hover,#dp-resize.dragging{background:rgba(124,90,246,0.18);}
+#dp-resize{position:absolute;left:-12px;top:0;width:24px;height:100%;cursor:col-resize;z-index:20;background:transparent;touch-action:none}
+#dp-resize:hover,#dp-resize.dragging{background:rgba(124,90,246,0.12);}
 #dp-resize::after {
   content: "";
   position: absolute;
-  left: 8px;
+  left: 10px;
   top: 0;
-  width: 5px;
+  width: 3px;
   height: 100%;
   background: #7c5af6;
   opacity: 0;
