@@ -552,24 +552,46 @@ function showDetail(node) {
 
   let html = "";
 
+
   if (node.short) {
     html += `<div style="color:#94a3b8;font-size:12px;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid #1e2433">${node.short}</div>`;
   }
 
-  if (node.detail) {
-    const d = node.detail;
-    if (d.what)    html += section("What",    `<p>${d.what}</p>`);
-    if (d.why)     html += section("Why",     `<p>${d.why}</p>`);
-    if (d.numbers) html += section("Numbers", `<p style="color:#fbbf24;font-size:11px">📐 ${d.numbers}</p>`);
+  // 1. What
+  if (node.detail?.what) {
+    html += section("What", `<p>${node.detail.what}</p>`);
   }
-
-  if (node.sizes_cfg)                  html += buildSizeCards(node.sizes_cfg);
-  if (node.tradeoffs?.length)          html += buildTradeoffs(node.tradeoffs);
-  if (node.levelUp?.length)            html += buildLevelUps(node.levelUp);
+  // 2. Why
+  if (node.detail?.why) {
+    html += section("Why", `<p>${node.detail.why}</p>`);
+  }
+  // 3. Tradeoffs
+  if (node.tradeoffs?.length) {
+    html += buildTradeoffs(node.tradeoffs);
+  }
+  // 4. Numbers
+  if (node.detail?.numbers) {
+    html += section("Numbers", `<p style=\"color:#fbbf24;font-size:11px\">📐 ${node.detail.numbers}</p>`);
+  }
+  // 5. Common Pitfalls
+  if (node.pitfalls?.length) {
+    html += buildPitfalls(node.pitfalls);
+  }
+  // 6. By Company Size
+  if (node.sizes_cfg) {
+    html += buildSizeCards(node.sizes_cfg);
+  }
+  // 7. Level Up Thresholds
+  if (node.levelUp?.length) {
+    html += buildLevelUps(node.levelUp);
+  }
+  // 8. Real World Examples
+  if (node.examples?.length) {
+    html += buildExamples(node.examples);
+  }
+  // (Other sections remain after examples)
   if (node.formulas?.length)           html += buildFormulas(node.formulas);
   if (node.antiPatterns?.length)       html += buildAntiPatterns(node.antiPatterns);
-  if (node.pitfalls?.length)           html += buildPitfalls(node.pitfalls);
-  if (node.examples?.length)           html += buildExamples(node.examples);
   if (node.related?.length)            html += buildRelatedLinks(node.related);
   if (activeExample)                   html += buildExampleOverlay(node);
 
