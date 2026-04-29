@@ -2,7 +2,7 @@
 // CONSTANTS
 // ══════════════════════════════════════════════════════════════
 
-const NODE_W = 238, NODE_H = 98, H_GAP = 300, V_GAP = 60;
+const NODE_W = 238, NODE_H = 150, H_GAP = 300, V_GAP = 60;
 const MIN_NODE_GAP = NODE_H + 16;
 
 const PHASE_COLORS = {
@@ -282,36 +282,59 @@ function render() {
     d3.select(this).selectAll("*").remove();
     if (!d.tradeoffs?.length) return;
 
+    const wrapText = (text, maxCharsPerLine = 60) => {
+      const words = text.split(/\s+/);
+      const lines = [];
+      let current = "";
+      words.forEach(word => {
+        if ((current + " " + word).trim().length > maxCharsPerLine) {
+          if (current) lines.push(current);
+          current = word;
+        } else {
+          current = current ? current + " " + word : word;
+        }
+      });
+      if (current) lines.push(current);
+      return lines;
+    };
+
     let lineIdx = 0;
     d.tradeoffs.slice(0, 3).forEach((axis, axisIdx) => {
-      const left = axis.left.split(":")[0];
-      const right = axis.right.split(":")[0];
-      const y = 36 + (lineIdx * 10);
+      const leftText = axis.left.split(":")[0];
+      const rightText = axis.right.split(":")[0];
+      const leftLines = wrapText(leftText);
+      const rightLines = wrapText(rightText);
 
-      d3.select(this)
-        .append("text")
-        .attr("x", 32)
-        .attr("y", y)
-        .style("font-size", "7px")
-        .style("fill", "#cbd5e1")
-        .style("pointer-events", "none")
-        .text(left + " vs");
+      if (axisIdx > 0) lineIdx += 1;
 
-      lineIdx += 1;
-      const y2 = 36 + (lineIdx * 10);
-      d3.select(this)
-        .append("text")
-        .attr("x", 32)
-        .attr("y", y2)
-        .style("font-size", "7px")
-        .style("fill", "#cbd5e1")
-        .style("pointer-events", "none")
-        .text(right);
+      leftLines.forEach((line, i) => {
+        const y = 36 + (lineIdx * 8);
+        d3.select(this)
+          .append("text")
+          .attr("x", 32)
+          .attr("y", y)
+          .style("font-size", "6px")
+          .style("fill", "#cbd5e1")
+          .style("pointer-events", "none")
+          .text(line + (i === leftLines.length - 1 ? " vs" : ""));
+        lineIdx += 1;
+      });
 
-      lineIdx += 1;
+      rightLines.forEach(line => {
+        const y = 36 + (lineIdx * 8);
+        d3.select(this)
+          .append("text")
+          .attr("x", 32)
+          .attr("y", y)
+          .style("font-size", "6px")
+          .style("fill", "#cbd5e1")
+          .style("pointer-events", "none")
+          .text(line);
+        lineIdx += 1;
+      });
 
       if (axisIdx < d.tradeoffs.slice(0, 3).length - 1) {
-        const sepY = 36 + (lineIdx * 10) - 5;
+        const sepY = 36 + (lineIdx * 8) - 4;
         d3.select(this)
           .append("line")
           .attr("x1", 12)
