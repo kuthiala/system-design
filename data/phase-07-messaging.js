@@ -7,7 +7,10 @@ const PHASE_MESSAGING = {
     why:"Synchronous everything is brittle — a 200ms request that calls 5 downstream services synchronously fails if any one is slow. Async decouples: drop the message, return success, process in background. You get load leveling (queue absorbs spikes), retry-on-failure, independent scaling, and audit trails. Cost: eventual consistency, idempotency, ordering, and dead-letter handling become your problems.",
     numbers:"Rule of thumb: anything >200ms that the user doesn't need synchronously should be async. Throughput: SQS ~3K msg/sec/queue, RabbitMQ ~50K, Kafka (event streaming platform) 100K–10M. Latency: queue write 1–10ms, consumer pickup 10–100ms typical. Critical metric to monitor: consumer lag (oldest-message-age). Growing lag means consumer capacity problem, not a queue problem."
   },
-  tradeoffs:[{axis:"Simplicity vs Decoupling",left:"Sync: simple, coupled",right:"Async: complex, decoupled",pos:0.5},{axis:"Ordering vs Throughput",left:"Strict order: slower",right:"Unordered: faster",pos:0.5}],
+  tradeoffs:[
+    {axis:"Communication style",left:"Synchronous RPC: caller waits for the response, easy to debug a single trace, tight runtime coupling",right:"Async via queue/topic: producer fires and forgets, consumers scale independently, plumbing complexity"},
+    {axis:"Ordering guarantees",left:"Strict ordering on a single partition/queue: serial processing, easy reasoning, throughput capped at one consumer",right:"No ordering guarantee: parallel consumers, high throughput, harder to maintain per-key invariants"}
+  ],
   pitfalls:[
     {name:"Non-idempotent consumers",desc:"At-least-once delivery means messages may be delivered twice. If your consumer charges a credit card on each message, duplicates = double charges. Always make consumers idempotent (use a unique message ID; check 'already processed?' before acting)."},
     {name:"Dead-letter queue ignored",desc:"Failed messages go to DLQ (Dead Letter Queue) but no one watches it. Months later, the DLQ (Dead Letter Queue) has 100K messages representing real lost work. Always alert on DLQ (Dead Letter Queue) depth >0; have a process to inspect and replay."},
@@ -27,7 +30,10 @@ const PHASE_MESSAGING = {
        why:"Each pattern fits a different need. Background jobs: simplest, perfect for 'send this email' kind of work. MQ: when producer and consumer are different services and you need reliable delivery + DLQ (Dead Letter Queue). Event streaming: when multiple downstream systems need the same events (search index, analytics, recommendations) or when you need event sourcing / replay. Picking too heavyweight = complexity tax; too lightweight = re-implementing missing features.",
        numbers:"Rule for offloading: take async anything >200ms in the user path that doesn't need synchronous result. Sidekiq job overhead: ~1ms enqueue, ~2ms pickup. SQS: 5–50ms end-to-end. Kafka (event streaming platform): <10ms producer-to-consumer at low volume, ~30–100ms at scale. Replay capability: SQS no, Kafka (event streaming platform) yes (within retention window — usually 7 days)."
      },
-     tradeoffs:[{axis:"Latency vs Resilience",left:"Sync: immediate",right:"Async: retryable",pos:0.5},{axis:"Throughput vs Ordering",left:"Unordered: higher throughput",right:"Ordered: lower throughput",pos:0.5}],
+     tradeoffs:[
+       {axis:"Failure handling",left:"Sync call: caller learns of failure immediately and must retry from the original context",right:"Async via durable queue: failed work stays queued, consumer retries automatically, dead-letter queue for poison pills"},
+       {axis:"Throughput vs ordering",left:"Unordered with many partitions: millions of msgs/sec, no per-key ordering",right:"Ordered per partition: ~10–50K msgs/sec per partition, FIFO within key"}
+     ],
      pitfalls:[
        {name:"Using Kafka (event streaming platform) when SQS would do",desc:"Kafka (event streaming platform) adds operational complexity (Zookeeper, partition management, consumer group coordination). At <10K msg/sec you don't need it. Use SQS or RabbitMQ until you have an actual reason for Kafka (event streaming platform) (replay, multiple consumers, ordering at scale)."},
        {name:"Background job DB updates without idempotency",desc:"Job that increments a counter runs twice on retry → counter is wrong. Use upserts with unique IDs, or atomic operations, or check-then-act with versioning."},

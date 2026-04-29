@@ -7,7 +7,10 @@ const PHASE_API = {
     why:"API decisions are uniquely sticky. Internal code can be refactored at will, but a public API has external consumers (mobile apps in the wild, partner integrations, third-party developers) who you can't force to upgrade. A v1 mistake might live for 5+ years. Getting the protocol, versioning, and contract style right at the start saves enormous pain later. Get it wrong and you'll either break consumers (losing trust) or maintain old API versions forever (paying complexity tax indefinitely).",
     numbers:"Plan for versioning from day 1, even if you only have v1. Breaking change policy: typically 6–12 month deprecation window for public APIs, longer for B2B. Latency budget: API gateway adds 1–5ms; account for it. Mobile app long tail: 20–30% of users on app versions >6 months old; design APIs assuming you can't push updates."
   },
-  tradeoffs:[{axis:"Developer experience vs Performance",left:"GraphQL (Graph Query Language): flexible",right:"gRPC (gRPC Remote Procedure Calls): fast",pos:0.5},{axis:"Simplicity vs Flexibility",left:"REST: simple",right:"GraphQL (Graph Query Language): complex client queries",pos:0.5}],
+  tradeoffs:[
+    {axis:"Developer experience vs performance",left:"GraphQL: clients pick exact fields per query, easy frontend iteration, server resolver complexity",right:"gRPC: binary protocol, 5–10× smaller payloads, lowest latency, less browser-friendly"},
+    {axis:"Protocol simplicity",left:"REST + JSON: universally understood, debug from a browser tab, verbose on the wire",right:"GraphQL: one endpoint, arbitrary client queries, server must defend against expensive shapes"}
+  ],
   pitfalls:[
     {name:"No versioning strategy",desc:"You ship v1, then realize you need to change the response shape. Now you either break clients or invent versioning under pressure. Build /v1/ into the URL or Accept header on day 1."},
     {name:"Leaky abstractions in the API",desc:"API exposes your internal database column names. Now you can't refactor the DB without breaking the API. API should be a deliberate contract, not a thin wrapper over your tables."},
@@ -28,7 +31,10 @@ const PHASE_API = {
        why:"Each is great at something different. REST: lowest barrier, ubiquitous tooling, fine for most external APIs. GraphQL (Graph Query Language): removes over-fetching/under-fetching when clients have varied needs (mobile vs web, etc.). gRPC (gRPC Remote Procedure Calls): 5–10× lower payload + lower CPU, ideal for service-to-service. WebSocket (persistent bidirectional communication protocol): required for real-time push (chat, live updates). Mixing them per use case (REST external, gRPC (gRPC Remote Procedure Calls) internal, WS for live) is normal.",
        numbers:"Latency comparison (typical): REST ~50–200ms total request, gRPC (gRPC Remote Procedure Calls) ~10–50ms (binary serialization saves ~5ms, HTTP/2 multiplexing saves another). Payload size: gRPC (gRPC Remote Procedure Calls)/Protobuf is ~5–10× smaller than equivalent JSON. GraphQL (Graph Query Language): 1 round trip vs N round trips for REST when client needs nested data. WebSocket (persistent bidirectional communication protocol): <5ms server-to-client push."
      },
-     tradeoffs:[{axis:"Simplicity vs Efficiency",left:"REST: universal",right:"gRPC (gRPC Remote Procedure Calls): 5–10× smaller payload",pos:0.5},{axis:"Flexibility vs Performance",left:"GraphQL (Graph Query Language): arbitrary queries",right:"gRPC (gRPC Remote Procedure Calls): strict schema, fast",pos:0.5}],
+     tradeoffs:[
+       {axis:"Wire efficiency",left:"REST + JSON: human-readable, any HTTP client works, larger payload and parse cost",right:"gRPC + protobuf: 5–10× smaller payloads, sub-ms parse, codegen required for each language"},
+       {axis:"Query shape",left:"GraphQL: clients ask for whatever fields they want, one endpoint to maintain",right:"gRPC: strict schema per RPC, no field surprises, schema changes require client codegen"}
+     ],
      pitfalls:[
        {name:"GraphQL (Graph Query Language) N+1 query problem",desc:"GraphQL (Graph Query Language) resolver fetches each related item from the DB individually. 1 GraphQL (Graph Query Language) query → 100 DB queries. Use DataLoader pattern to batch."},
        {name:"GraphQL (Graph Query Language) exposed to public without query depth limits",desc:"Attacker sends a 50-level deep nested query → DB melts. Always: enforce max query depth, complexity, and per-client rate limits on GraphQL (Graph Query Language)."},
@@ -59,7 +65,10 @@ const PHASE_API = {
        why:"Without a gateway, every service implements auth, rate limiting, SSL, etc. — duplicated work, inconsistent behavior, security gaps. With a gateway, these concerns are centralized: change auth in one place, applied everywhere. Gateway also enables platform features (canary deploys, A/B testing, request shadowing) that would be impossible to coordinate across many services individually.",
        numbers:"Latency added: 1–5ms typical for managed gateways, <1ms for tuned custom gateways. Throughput per gateway node: managed (Kong, AWS API Gateway) handle ~100K RPS; custom Envoy can do 1M+ RPS. Plan to deploy gateway in HA pairs at minimum."
      },
-     tradeoffs:[{axis:"Centralization vs Latency",left:"One hop for auth etc.",right:"Added network latency",pos:0.5},{axis:"Managed vs Custom",left:"Less ops burden",right:"More control",pos:0.4}],
+     tradeoffs:[
+       {axis:"Cross-cutting concerns location",left:"Gateway handles auth, rate limit, logging, retries: services stay focused on business logic",right:"Skip the gateway: shave 1–3ms per request; every service implements cross-cutting itself"},
+       {axis:"Gateway ownership",left:"Managed (Kong, AWS API Gateway, Cloudflare): low ops, billed per request, vendor-shaped feature set",right:"Self-hosted (Envoy, custom proxy): full control, you own the runtime and CVE patching"}
+     ],
      pitfalls:[
        {name:"Business logic in the gateway",desc:"Gateway started as 'just routes and auth' — now has 5K lines of business logic. Becomes the bottleneck and a deployment risk for everything. Keep gateway thin: routing, auth, rate limit, logging. Business logic in services."},
        {name:"Gateway as single point of failure",desc:"Gateway down = entire API down. Always run multiple gateway instances behind a load balancer. Health-check them aggressively."},
@@ -89,7 +98,10 @@ const PHASE_API = {
        why:"Without rate limiting, one bad actor (or one buggy client) can take down your system. Even well-meaning clients can saturate you during deploys ('replay all queued requests now'). Rate limits also provide tier differentiation in monetized APIs (free=100/min, paid=10K/min). The cheapest insurance you can buy.",
        numbers:"Common tier shapes: free 100 req/min, basic 1K/min, enterprise 10K/min. Burst allowance: typically 2–5× sustained for short windows (token bucket). Per-IP limits as floor (anti-abuse): 1K/min/IP. Per-account limits for monetization. Algorithms: token bucket (good default), sliding window (more accurate, more memory), fixed window (simple, can spike at boundaries)."
      },
-     tradeoffs:[{axis:"Strict vs Permissive limits",left:"Better protection",right:"Better developer experience",pos:0.5},{axis:"Accuracy vs Speed",left:"Exact count (Redis)",right:"Approximate (local counter)",pos:0.5}],
+     tradeoffs:[
+       {axis:"Limit strictness",left:"Tight limits (e.g., 100 req/min): strong abuse protection, legitimate spikes get 429d",right:"Loose limits (e.g., 10K req/min): clients rarely throttled, much higher risk of overrunning infra"},
+       {axis:"Counting accuracy",left:"Centralized counter (Redis, DynamoDB): exact across all instances, +1ms network hop per request",right:"Per-instance in-memory counter: zero network cost, effective limit becomes N× across instances"}
+     ],
      pitfalls:[
        {name:"No 429 Retry-After header",desc:"Client gets 429 with no info on when to retry. They retry immediately, hammering you. Always include Retry-After: <seconds> header."},
        {name:"Rate limit on the wrong key",desc:"You rate-limit by IP. A million users behind one corporate NAT all hit the limit instantly. Limit by user ID / API key for authed traffic; IP only for anonymous endpoints."},

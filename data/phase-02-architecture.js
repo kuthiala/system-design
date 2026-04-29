@@ -7,7 +7,10 @@ const PHASE_ARCHITECTURE = {
     why:"This decision shapes everything: how teams collaborate, how fast you ship, how often things break, how much ops complexity you carry. Microservices are seductive — Netflix and Amazon use them, so we should too! — but they have ~10× the operational overhead of a monolith. They pay off only when you have enough teams and engineers that coordination on a single codebase has become the bottleneck. The right architecture is the simplest one that solves your team and scale problems, not the most sophisticated one.",
     numbers:"Heuristics: <20 engineers → monolith. 20–100 → modular monolith. 100–500 → microservices. >500 → platform engineering. Roughly 1 service per team (Conway's law (organizational structure mirrors system architecture): structure mirrors org). Median microservices org has 50–500 services. The cost of a microservices migration: typically 12–18 months of slowed feature velocity. Don't take that hit until the monolith is genuinely blocking you."
   },
-  tradeoffs:[{axis:"Operational simplicity vs Team autonomy",left:"Monolith: simple ops",right:"Microservices: team independence",pos:0.5},{axis:"Coupling vs Deployment speed",left:"Monolith: one deploy",right:"Services: independent deploys",pos:0.5}],
+  tradeoffs:[
+    {axis:"Architecture style",left:"Monolith: one repo, one deploy, single shared DB; simplest possible ops",right:"Microservices: per-team services with their own stacks and storage; max team independence"},
+    {axis:"Deployment coupling",left:"Single deploy unit: ship everything together, easy atomic rollback",right:"Many independent services: each team deploys on its own cadence, coordination becomes the cost"}
+  ],
   pitfalls:[
     {name:"Microservices for a 5-person team",desc:"5 engineers + 15 services = each engineer maintaining 3 services they barely understand. Operational overhead crushes feature work. Microservices need team boundaries to make sense; without enough teams, you're paying complexity for no benefit."},
     {name:"Distributed monolith",desc:"You split into services but they all share one DB and call each other synchronously. Now you have all the operational pain of microservices with all the coupling of a monolith — worst of both. Fix: each service owns its data; communicate async where possible."},
@@ -33,7 +36,10 @@ const PHASE_ARCHITECTURE = {
        why:"Fastest to start. No network latency between components. Easy to debug (one stack trace), easy to test (one process), easy to deploy (one artifact). The wrong choice only when you have so many engineers that coordinating on the codebase becomes the bottleneck — typically not until 20+ engineers.",
        numbers:"Comfortable upper bounds: ~20 engineers, ~500K LOC (Lines Of Code), 10K RPS, 500GB data. Beyond these, the friction of working in one codebase starts to outweigh the operational simplicity. Plan modularization (not extraction) when you approach these limits."
      },
-     tradeoffs:[{axis:"Velocity vs Scalability",left:"Fast for small teams",right:"Bottleneck for large teams",pos:0.2},{axis:"Simple deploys vs Independent scaling",left:"One deploy for all",right:"Can't scale parts separately",pos:0.2}],
+     tradeoffs:[
+       {axis:"Velocity by team size",left:"Small team (≤20 engineers): days from idea to prod, no coordination overhead",right:"Large team (≥100 engineers): merge conflicts, slow CI, code-ownership disputes block velocity"},
+       {axis:"Scaling granularity",left:"One artifact, one deploy: simple to release and reason about",right:"Hot path scales together with cold paths: pay to scale the whole thing even if only one feature is loaded"}
+     ],
      pitfalls:[
        {name:"Big ball of mud",desc:"No internal boundaries; every file imports every other file. Refactoring is impossible. Avoidable with modules/packages from day 1, even in a monolith."},
        {name:"One slow endpoint kills everything",desc:"A poorly written report endpoint hogs all DB connections; the entire app slows down. Use connection pooling per concern, set timeouts, monitor per-endpoint latency."}
@@ -54,7 +60,10 @@ const PHASE_ARCHITECTURE = {
        why:"Gives you team autonomy without the operational burden of microservices. Each team owns a module; they can iterate within it freely. Deploy is still one unit (simple) but code is decoupled (fast iteration). The best choice for 20–100 engineers — and many companies stay here much longer.",
        numbers:"Target shape: each module <100K LOC (Lines Of Code), owned by 1–2 teams, with explicit public API at the module boundary. Database can be one cluster but schema-per-module (each module's tables are private). Can support up to ~50K RPS comfortably with proper horizontal scaling of the monolith itself."
      },
-     tradeoffs:[{axis:"Structure vs Flexibility",left:"More disciplined code",right:"Easier to start",pos:0.55},{axis:"Scale now vs Scale later",left:"Design for future split",right:"Ship faster now",pos:0.45}],
+     tradeoffs:[
+       {axis:"Module discipline",left:"Strict module boundaries enforced by the compiler/linter: harder to write, easy to extract into a service later",right:"No internal boundaries: ships fastest now, painful to split when the team grows past the monolith"},
+       {axis:"Future-proofing vs ship speed",left:"Design every module so it could become a service: extra abstraction up front, smooth split later",right:"Optimize for shipping today: lower-friction development, may rewrite at the seam when scaling forces a split"}
+     ],
      pitfalls:[
        {name:"Boundaries that leak",desc:"Module A's internals get imported from module B 'just this once.' A year later they're hopelessly entangled and you can't extract A. Enforce boundaries with linting / architecture tests (e.g., ArchUnit, dependency-cruiser)."},
        {name:"Shared database tables across modules",desc:"Two modules write to the same table; coupling is invisible until you try to extract one. Schema-per-module keeps the option open."}
@@ -75,7 +84,10 @@ const PHASE_ARCHITECTURE = {
        why:"At sufficient scale, the bottleneck is not technology but human coordination. Microservices let 100+ teams ship independently — Team A's deploy doesn't block Team B. Failures are isolated (one service crashing doesn't take everything down). Each service can scale independently. The cost: every internal call is now a network call (latency, failure modes), every service needs its own deploy pipeline, and you've created a distributed system with all that entails.",
        numbers:"Median microservices org: 50–500 services. Each service: 1–3 engineers, 10K–100K LOC (Lines Of Code). Service count grows with team count, not user count: 100 engineers → ~30 services typical. Network overhead: each cross-service call adds 1–5ms. A request that fans out to 10 services has ~30ms of network alone."
      },
-     tradeoffs:[{axis:"Team autonomy vs Operational complexity",left:"Teams deploy independently",right:"More infra to manage",pos:0.7},{axis:"Isolation vs Latency",left:"Failures isolated",right:"Network hop per call",pos:0.6}],
+     tradeoffs:[
+       {axis:"Team autonomy vs ops cost",left:"Per-team deploys, polyglot stacks, independent on-call: max independence and ownership",right:"Service mesh, shared observability, multiple on-call rotations: heavy ops surface and platform investment"},
+       {axis:"Failure isolation vs latency",left:"Service boundaries contain blast radius: a bug in one service can't crash others",right:"Each call is a network hop: 1–5ms each, adds up across deep call chains"}
+     ],
      pitfalls:[
        {name:"Too many services per team",desc:"5 engineers, 20 services = each service is undermaintained. Aim for 1–3 services per team."},
        {name:"Synchronous chains 5+ hops deep",desc:"A → B → C → D → E synchronously. Any one slowness multiplies. Use async events or fewer, larger services."},
@@ -98,7 +110,10 @@ const PHASE_ARCHITECTURE = {
        why:"At hyper scale, every team building their own infra is wasteful and dangerous. The platform team's products (deploy pipeline, service template, observability stack) save thousands of engineer-hours and enforce safety properties (security, observability) by default. Cells contain blast radius — a 1% bad cell affects 1% of users, not 100%. Both are required at scale; neither is needed at small scale.",
        numbers:"Platform team sizing: ~1 platform engineer per 8–12 product engineers. Cell sizing: each cell typically 1–10% of total capacity, with N+2 cells (so losing 2 still leaves capacity). Self-service: a new service should go from 'idea' to 'deployed in prod with monitoring/alerting' in <1 day for the team."
      },
-     tradeoffs:[{axis:"Standardization vs Team freedom",left:"Platform mandates stacks",right:"Teams choose freely",pos:0.7},{axis:"Blast radius vs Complexity",left:"Cells limit damage",right:"More infra overhead",pos:0.65}],
+     tradeoffs:[
+       {axis:"Standardization vs team freedom",left:"Platform-mandated stacks and templates: consistent ops, easier mobility, slower to adopt new tech",right:"Teams choose any language, framework, runtime: max flexibility, fragmented tooling and on-call playbooks"},
+       {axis:"Cell isolation vs complexity",left:"Per-cell shards (each cell = isolated copy of stack): one outage hits 1/N of users",right:"No cell boundary: simpler topology, an outage takes down the entire customer base"}
+     ],
      pitfalls:[
        {name:"Platform team builds for hypothetical needs",desc:"Six months building a 'flexible deploy framework' nobody uses. Always: platform built from real product team pain, with product teams as customers. Treat platform as a product."},
        {name:"Cells without isolation",desc:"You call them 'cells' but they share a global DB or auth service. A failure in that shared component takes down all 'cells.' True cells share nothing — full stack copies."},

@@ -7,7 +7,9 @@ const PHASE_REQUIREMENTS = {
     why:"Every architectural choice is only correct relative to your actual workload. Postgres is right at 1K RPS and wrong at 1M RPS; Cassandra is the opposite. Without numbers, you're guessing — and guessing wrong is expensive: an over-engineered architecture wastes money and slows development for years; an under-engineered one collapses on launch day. Requirements are also the contract between engineering and product/business: they make trade-offs explicit ('99.99% costs 5× more than 99.9% — which do you want?') instead of letting them be made implicitly by whoever writes the code.",
     numbers:"Spend 20–30% of design time here. A poorly specified system gets designed twice. Key numbers to nail down before any architecture: avg & peak RPS, R/W ratio, p99 latency target, availability SLO, data size today + growth/month, geographic distribution of users, consistency requirements per feature. If any of these aren't pinned within an order of magnitude, you're not ready to start designing."
   },
-  tradeoffs:[{axis:"Precision vs Speed",left:"Perfect spec → slow start",right:"Fast start → wrong design",pos:0.4}],
+  tradeoffs:[
+    {axis:"Specification depth",left:"Numbers pinned before design starts: solid plan, kicks off weeks later",right:"Skip the spec, start coding now: ship in days, redesign in months"}
+  ],
   pitfalls:[
     {name:"Designing for hypothetical scale",desc:"'What if we go viral and hit 100M users?' You build for that, ship in 18 months instead of 3, never reach 100K users. Design for 10× current scale, not 10000×. Re-architect when you actually need to."},
     {name:"Single SLO across all endpoints",desc:"You set 'p99 <200ms' globally. /search needs that; /export-pdf doesn't. Per-endpoint SLOs let you optimize where it matters and not waste effort where it doesn't."},
@@ -29,7 +31,9 @@ const PHASE_REQUIREMENTS = {
        why:"Traffic is the primary input to nearly every infrastructure decision: how many shards, how many replicas, what cache tier, what autoscaling policy. Get the order of magnitude wrong and your architecture is built for the wrong system. Get the peak-to-avg ratio wrong and you either over-provision (waste money) or melt during traffic spikes.",
        numbers:"Collect: avg RPS, p95 RPS, p99 RPS, peak-to-avg multiplier, DAU, MAU, data size today, data growth/month. Typical peak-to-avg: B2B SaaS 5–10× (workday peak), consumer 3–5× (evening peak), seasonal e-commerce 50–100× (Black Friday). Always size for peak with headroom, not average."
      },
-     tradeoffs:[{axis:"Design for avg vs design for peak",left:"Cheaper infra",right:"No outage at peak",pos:0.7}],
+     tradeoffs:[
+       {axis:"Capacity sizing target",left:"Provision for average load: cheap steady state, melts during 5× peaks",right:"Provision for peak load: handles every spike, pays for idle capacity 90% of the time"}
+     ],
      pitfalls:[
        {name:"Forgetting daily/weekly cycles",desc:"Average RPS is fine; the problem is the 9am Monday spike that's 8× higher. Always model the 24h/7d traffic curve, not just averages."},
        {name:"Ignoring data growth",desc:"100GB today, growing 10GB/month. In 3 years you'll have 460GB; in 5 years, 700GB. Postgres is fine; Cassandra is overkill. But at 100GB/month growth, in 5 years you have 6TB and need to plan for sharding now."}
@@ -58,7 +62,10 @@ const PHASE_REQUIREMENTS = {
        why:"Same RPS leads to completely different architectures depending on R/W. A 100K RPS read-heavy system (99% reads) is solved by adding cache + replicas — relatively easy. A 100K RPS write-heavy system needs sharding, async pipelines, and write-optimized storage — much harder. Knowing the ratio early prevents building the wrong solution.",
        numbers:"Typical ratios: social feed 1000:1 read-heavy, e-commerce 10:1, analytics ingestion 1:100 write-heavy, chat 1:1. Within a single product different features have different ratios — analyze per feature, not just system-wide."
      },
-     tradeoffs:[{axis:"Read optimization vs Write optimization",left:"More replicas, caches",right:"Async writes, sharding",pos:0.5},{axis:"Consistency vs Throughput",left:"Strong reads",right:"Stale reads OK",pos:0.5}],
+     tradeoffs:[
+       {axis:"Read vs write optimization",left:"Tuned for reads: replicas, caches, denormalized views serve the hot path",right:"Tuned for writes: sharding, async pipelines, LSM stores absorb high ingest"},
+       {axis:"Read consistency vs throughput",left:"Reads must be fresh: every read goes to the primary, throughput capped by it",right:"Stale reads OK: replicas + caches absorb the load, data may be seconds behind"}
+     ],
      pitfalls:[
        {name:"Average ratio hides bursty writes",desc:"Average is 100:1 but every minute there's a 10-second burst at 1:10 (a batch import). Architecting for the average gets you crushed during bursts. Look at p99 ratio, not just average."},
        {name:"Writes that are actually reads",desc:"You count 'page view increment' as a write — but it's idempotent and you batch it. Distinguish durable writes (must persist) from telemetry writes (can drop). Architect them differently."}
@@ -87,7 +94,10 @@ const PHASE_REQUIREMENTS = {
        why:"Latency budget directly constrains architecture. A 10ms SLO (Service Level Objective) forces in-memory data and edge compute. A 200ms SLO allows DB (Database) round-trips. A 5s SLO allows complex computation. Without an explicit SLO, every engineer optimizes for their gut feel — some over-engineer, some under-deliver. Per-percentile matters because user experience is dominated by the tail: p99 is what your worst 1% of users see, and they're often your most active ones.",
        numbers:"Human perception: <100ms feels instant, 100–300ms feels fast, 300ms–1s feels noticeable lag, >1s feels broken. Common targets: interactive APIs p99 <200ms; background batch p99 <5s; real-time push p99 <100ms. Measure p99 not avg — averages hide the long tail entirely."
      },
-     tradeoffs:[{axis:"Strict SLO vs Cost",left:"More infra needed",right:"Looser = cheaper",pos:0.6},{axis:"Consistency vs Latency",left:"Wait for quorum",right:"Serve stale data fast",pos:0.5}],
+     tradeoffs:[
+       {axis:"Latency target",left:"p99 < 50ms: needs CDN, edge compute, dedicated low-latency network paths",right:"p99 < 1s: single region with caching is enough"},
+       {axis:"Consistency vs latency",left:"Wait for quorum: correct, adds 30–80ms cross-region per write",right:"Serve from local replica: fast, may be seconds stale"}
+     ],
      pitfalls:[
        {name:"Optimizing average instead of p99",desc:"'Average is 50ms, we're great!' But p99 is 5s — 1 in 100 users has a terrible experience. Always measure and optimize tail percentiles. Average is misleading."},
        {name:"SLO ignores network",desc:"Server-side p99 is 50ms, but the user is in Australia and you're in Virginia — they see 250ms minimum. Either deploy regionally, or set SLO honestly to include network."},
@@ -118,7 +128,10 @@ const PHASE_REQUIREMENTS = {
        why:"Each extra nine is disproportionately more expensive: 99.9%→99.99% costs roughly 3–5× more (multi-AZ + automated failover), 99.99%→99.999% costs 4–10× on top of that (multi-region active-active + cell architecture + dedicated SRE team). The increases compound, not multiply by a flat 10×. Most products don't need 99.999% — but the ones that do (payments, healthcare, telecom) cannot tolerate less. Pick deliberately based on what your business and users actually need.",
        numbers:"99% = 7.3h/month down; 99.9% = 43min; 99.95% = 22min; 99.99% = 4.4min; 99.999% = 26s. Cost multipliers (rough): 99.9%=1×, 99.99%=3–5×, 99.999%=20–50×. Industry norms: consumer apps 99.9%, B2B SaaS 99.95%, financial systems 99.99%+, telecom/medical 99.999%."
      },
-     tradeoffs:[{axis:"Availability vs Cost",left:"5 nines = $$$",right:"2 nines = $",pos:0.5},{axis:"Consistency vs Availability",left:"CP: refuse writes on partition",right:"AP: accept writes, resolve later",pos:0.5}],
+     tradeoffs:[
+       {axis:"Availability target",left:"99.999% (≤26s/month down): multi-region active-active, dedicated SRE, every change risk-reviewed",right:"99% (≤7h/month down): single AZ, manual failover, weekend maintenance windows"},
+       {axis:"Behavior under partition (CAP)",left:"CP: refuse writes during the partition, never serve inconsistent data",right:"AP: keep accepting writes on each side, reconcile conflicts after the network heals"}
+     ],
      pitfalls:[
        {name:"Confusing component availability with system availability",desc:"5 services each at 99.9% in series = 99.5% total. Adding components reduces availability unless you build redundancy. Math the chain."},
        {name:"Counting only unplanned downtime",desc:"You exclude maintenance windows. Users don't care if the outage was 'planned' — they still can't use the product. Modern SLOs include all downtime; deploy without downtime."},
@@ -149,7 +162,10 @@ const PHASE_REQUIREMENTS = {
        why:"Strong consistency requires coordination — Paxos, Raft, two-phase commit — which means latency (10–100ms+ for cross-region quorum) and availability cost (CAP theorem (Consistency, Availability, Partition tolerance): pick C or A during partition). Eventual is cheap and fast, but the application must handle stale reads gracefully. Picking strong everywhere wastes performance; picking eventual everywhere creates user-visible bugs. Per-feature analysis is the only correct approach.",
        numbers:"Examples: bank balance = strong (you can't show stale money). Like count = eventual (5s staleness is fine). Shopping cart = read-your-writes (user sees their own additions immediately). Friend list = eventual with <60s staleness. Strong consistency latency floor: ~10ms within DC, ~30–80ms cross-region (quorum). Eventual: limited only by network."
      },
-     tradeoffs:[{axis:"Strong vs Eventual consistency",left:"Correct, slower",right:"Fast, possibly stale",pos:0.5},{axis:"Availability vs Consistency (CAP)",left:"Always available",right:"Always correct",pos:0.5}],
+     tradeoffs:[
+       {axis:"Read consistency model",left:"Strong: every read sees the latest write, ~10ms coordination floor per op",right:"Eventual: low latency, may show stale data for seconds; client must handle it"},
+       {axis:"Behavior under partition (CAP)",left:"AP: stay available, replicas may diverge until the partition heals",right:"CP: stay correct, refuse operations on the partitioned side"}
+     ],
      pitfalls:[
        {name:"Strong consistency by default everywhere",desc:"Easy to do; expensive to operate. Every read pays coordination cost even when staleness was fine. Audit per-feature: most features tolerate eventual; reserve strong for the few that don't."},
        {name:"Eventual consistency with no UX handling",desc:"User clicks 'Like', UI shows like, refresh — like disappeared (read hit a stale replica). User panics. Either: route reads after writes to primary (read-your-writes), or have UI optimistically reflect the local action."},
@@ -180,7 +196,10 @@ const PHASE_REQUIREMENTS = {
        why:"Speed of light is a hard constraint: London↔NYC is ~70ms minimum, no software optimization can fix it. If you have a 100ms SLO and users on multiple continents, you must deploy regionally. Geography also drives compliance: EU data must stay in the EU, China data in China, etc. Underestimate geographic distribution and your global users have a slow, possibly illegal experience.",
        numbers:"Speed of light limits: within 1 region <1ms RTT, cross-AZ <5ms, cross-region same continent 30–80ms, cross-continent 80–300ms. CDN serves static globally at 5–30ms. Compliance: GDPR (EU), CCPA (California), LGPD (Brazil), PIPL (China) — each may require data residency."
      },
-     tradeoffs:[{axis:"Global coverage vs Operational complexity",left:"More regions = more ops",right:"Single region = simple",pos:0.5},{axis:"Data locality vs Data consistency",left:"Local = fast",right:"Global = consistent",pos:0.5}],
+     tradeoffs:[
+       {axis:"Geographic footprint",left:"3+ regions deployed: <50ms latency worldwide, 3× ops surface and replication complexity",right:"Single region: simple to operate, 200ms+ for users on the other side of the world"},
+       {axis:"Data locality vs consistency",left:"Pin data per region: fast local reads, hard to reconcile globally on conflicts",right:"One global source of truth: globally consistent, 100ms+ on every cross-region read"}
+     ],
      pitfalls:[
        {name:"Adding regions for marketing reasons",desc:"'We're global!' but users don't actually care. You doubled your ops burden for no real benefit. Add regions only when latency or compliance demands it."},
        {name:"Multi-region without thinking through data",desc:"Deploy compute to 3 regions but DB still in one. Now those regions hit cross-region DB latency on every request — slower than before. Multi-region requires distributed data, which requires consistency thinking."},

@@ -7,7 +7,10 @@ const PHASE_COMPUTE = {
     why:"Compute is usually the largest line item on your cloud bill (40–70%). Over-provisioning by 2× doubles that cost; under-provisioning means outages exactly when traffic peaks. Auto-scaling done right means you pay for what you use; done wrong, it scales up too slowly to save the day or down too aggressively into outages. The compute model also gates deploy velocity — VMs (Virtual Machines) in 5–10 min, containers in 30s, functions in <1s.",
     numbers:"Healthy autoscaling target: 60–70% CPU steady-state. <40% sustained = overprovisioned; >80% = no headroom for spikes. Scale-up reaction: aim for instances ready in <2 minutes (containers do this; VMs (Virtual Machines) can't). Scale-down: hold 10–15 min after load drops to avoid flapping. Rule: provision for p99 traffic, not average."
   },
-  tradeoffs:[{axis:"Cost vs Headroom",left:"Tight provisioning: cheap",right:"Over-provisioned: safe",pos:0.5},{axis:"Stateless vs Stateful",left:"Stateless: easy to scale",right:"Stateful: complex scaling",pos:0.5}],
+  tradeoffs:[
+    {axis:"Provisioning headroom",left:"Tight (target 70% CPU): minimum spend, melts when traffic doubles unexpectedly",right:"Generous (target 30% CPU): handles 3–5× spikes gracefully, pays for mostly-idle servers"},
+    {axis:"State location",left:"Stateless services: scale by adding instances; any LB strategy works; restarts are free",right:"Stateful services (in-memory sessions, local disk): sticky sessions or shared store needed; horizontal scaling is hard"}
+  ],
   pitfalls:[
     {name:"Stateful processes with horizontal scaling",desc:"You scale to 10 instances, each holding in-memory session state. User's session works on one instance, fails on the others. Externalize state (Redis/DB) before scaling out."},
     {name:"Autoscaling on the wrong metric",desc:"Scale on CPU, but bottleneck is DB connections. CPU stays at 30%, requests queue, latency spikes — autoscaler does nothing. Pick the metric that actually correlates with user pain (RPS, queue depth, p99 latency)."},
@@ -26,7 +29,10 @@ const PHASE_COMPUTE = {
        why:"Each model has a sweet spot. Serverless wins at low/spiky scale (zero ops, pay per use, scales to zero) but becomes 5–10× more expensive than containers at sustained load. Containers (ECS (Elastic Container Service), Cloud Run) win at moderate scale — easy ops, predictable cost. Kubernetes wins past ~30 services where you need fine-grained control and self-healing. VMs (Virtual Machines) survive only for legacy or special hardware needs.",
        numbers:"Cost crossover: serverless ≈ container at ~30% utilization; below that serverless wins, above it containers win. Lambda (AWS serverless computing): $0.20/M requests + $0.0000167/GB-sec. ECS (Elastic Container Service) Fargate: ~$0.04/vCPU-hour. Self-managed K8s (Kubernetes): ~50% cheaper than Fargate but adds a platform team. Container cold start: <100ms. Lambda (AWS serverless computing) cold start: 100ms–5s depending on language and package size."
      },
-     tradeoffs:[{axis:"Ops burden vs Control",left:"Serverless: zero ops",right:"VMs (Virtual Machines): full control",pos:0.5},{axis:"Cost at low scale vs Cost at high scale",left:"Serverless cheap idle",right:"Containers cheap at scale",pos:0.5}],
+     tradeoffs:[
+       {axis:"Compute abstraction",left:"Serverless (Lambda, Cloud Run): zero ops, cold starts of 100ms–2s, opaque runtime",right:"VMs / bare metal: pick the kernel, mount the disk, debug with strace; you own patching and on-call"},
+       {axis:"Cost curve",left:"Serverless: $0 idle, expensive past ~1M requests/day per function",right:"Containers / VMs: pay for capacity even when idle, much cheaper past sustained load"}
+     ],
      pitfalls:[
        {name:"Lambda (AWS serverless computing) for high-throughput sustained workloads",desc:"At 1000 RPS sustained, Lambda (AWS serverless computing) costs ~10× a single container. Lambda (AWS serverless computing) is for spiky/idle workloads. If your service runs 24/7 at meaningful load, container it."},
        {name:"Kubernetes at small scale",desc:"3 engineers + 5 services + Kubernetes = 80% of time on infra, 20% on product. K8s (Kubernetes) pays off only at 30+ services or >500 engineers. Use ECS (Elastic Container Service)/Cloud Run until you're sure you've outgrown them."},
@@ -57,7 +63,10 @@ const PHASE_COMPUTE = {
        why:"Without a load balancer, a single server crash = total outage. With one, that server is removed from rotation in seconds while others absorb the load. The LB also enables zero-downtime deploys (drain old instances, add new ones), canary releases (route 1% to new version), and A/B tests (5% to variant B). It's the primary mechanism by which a system stops being fragile.",
        numbers:"L4 LB throughput: 1–10M connections/sec per node. L7 LB: 100K–1M RPS per node. Health check interval: 5–30s typical; failure threshold 2–3 consecutive misses (so a node is removed within ~15s of failure). DNS-based routing: TTL 60s = up to 60s for failover. Anycast routing: failover in <1s via BGP withdrawal."
      },
-     tradeoffs:[{axis:"L4 vs L7 load balancing",left:"L4: faster, less CPU",right:"L7: routing by path/header",pos:0.5},{axis:"Global vs Regional",left:"Anycast: global",right:"Regional LB: simpler",pos:0.5}],
+     tradeoffs:[
+       {axis:"Load balancer layer",left:"L4 (TCP/UDP): forwards bytes, sub-ms overhead, no application awareness",right:"L7 (HTTP): routes by path/header/cookie, can rewrite, terminates SSL, +0.5–2ms per request"},
+       {axis:"LB scope",left:"Anycast / global LB: each user hits the closest PoP; complex BGP and health-routing setup",right:"Regional LB per region: simple to reason about, users are pinned to one region per request"}
+     ],
      pitfalls:[
        {name:"Round-robin distribution with sticky workloads",desc:"Round-robin sends requests to instances in turn. If one user makes 90% of the heavy queries (e.g., a big tenant), one instance gets crushed while others idle. Use least-connections or latency-weighted distribution."},
        {name:"Health check that's too lightweight",desc:"Health check returns 200 if the process is up — but the DB connection pool is exhausted and real requests fail. Health check must exercise the actual dependencies (DB ping, downstream service ping). Otherwise you keep routing traffic to broken nodes."},

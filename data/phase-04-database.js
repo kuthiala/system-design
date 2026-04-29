@@ -7,7 +7,10 @@ const PHASE_DATABASE = {
     why:"Database is the most consequential and least reversible decision in system design. Application code can be rewritten in months; data migrations take 6–18 months and have non-zero data-loss risk. Choosing the wrong primary store can cap your scale or your features. Choosing the wrong secondary store wastes ops effort. The right answer depends on access pattern, not popularity — Postgres (PostgreSQL) is famously underrated for being correct in 90% of cases; MongoDB and Cassandra are famously overused for the wrong reasons.",
     numbers:"Decision factors: RPS (reads vs writes), record size, query complexity, consistency needs, schema flexibility, team familiarity. Rough scale ceilings: Postgres (PostgreSQL) single node ~50K writes/sec; with replicas ~200K reads/sec; sharded Postgres (PostgreSQL) ~1M writes/sec. Cassandra: 100K–1M writes/sec out of the box. DynamoDB: effectively unlimited with right key design. Don't shard or distribute until you've exhausted the simpler tier — every step up costs 5–10× more in ops effort."
   },
-  tradeoffs:[{axis:"Schema flexibility vs Query power",left:"NoSQL: flexible schema",right:"SQL: rich queries",pos:0.5},{axis:"Scale vs Consistency",left:"Distributed NoSQL",right:"ACID relational",pos:0.5}],
+  tradeoffs:[
+    {axis:"Schema vs query power",left:"NoSQL document/KV: schemaless, fast to evolve, denormalize and pre-join for queries",right:"SQL relational: strict schema, joins, aggregates, declarative queries, refactors are migrations"},
+    {axis:"Scale ceiling vs ACID guarantees",left:"Distributed NoSQL (Cassandra, DynamoDB): petabyte scale, eventual consistency, no cross-shard transactions",right:"Single-node SQL (Postgres, MySQL): ACID transactions, ceiling around 10–100TB and 50K writes/s"}
+  ],
   pitfalls:[
     {name:"Choosing NoSQL because 'it scales'",desc:"You picked Mongo because Mongo is webscale. Six months in, your data has relationships you didn't anticipate, and you're hand-rolling joins in application code. Postgres (PostgreSQL) handles 99% of small/medium workloads — start there unless you have a specific reason not to."},
     {name:"Storing files in the database",desc:"Avatars, PDFs, video thumbnails as BLOBs in Postgres (PostgreSQL). Bloats backups, kills query performance, costs 10× S3 prices. File data goes in object storage; DB stores the URL."},
@@ -29,7 +32,10 @@ const PHASE_DATABASE = {
        why:"Pick based on access pattern, not buzzwords. Most applications have relational data: users have many orders, orders have many items, items have many reviews. SQL is the right answer. If your data is genuinely document-shaped (varying fields, no joins) or massively write-heavy time-series, NoSQL fits. The cost of a wrong choice is paid for years.",
        numbers:"Rough ceilings before sharding: Postgres (PostgreSQL) ~50K TPS (Transactions Per Second) on tuned hardware (~16-core, NVMe), ~500GB before maintenance gets painful. MySQL similar. Cassandra: each node handles ~10K writes/sec; clusters scale linearly to 1M+. DynamoDB: unlimited if partition key is well-designed; expensive at high scale ($0.25/M writes)."
      },
-     tradeoffs:[{axis:"Relational vs Document",left:"SQL: joins, ACID",right:"NoSQL: scale, flex",pos:0.5},{axis:"Operational simplicity vs Scale",left:"Managed DB: simple",right:"Cassandra: complex but huge scale",pos:0.5}],
+     tradeoffs:[
+       {axis:"Data shape",left:"Relational tables: foreign keys, joins, ACID transactions, schema migrations on change",right:"Documents / wide-column: denormalized, embedded, scales horizontally, no joins"},
+       {axis:"Ops effort vs scale ceiling",left:"Managed Postgres/MySQL (RDS, Cloud SQL): low ops, ceiling ~10TB and 100K writes/s",right:"Self-run Cassandra/HBase: heavy ops investment, scales to PB and millions of writes/s"}
+     ],
      pitfalls:[
        {name:"Premature sharding",desc:"You shard at 10K RPS because you read it would scale better. Now you've taken on 5× the operational complexity for no benefit. Vertically scale + read replicas first; shard only when forced to."},
        {name:"Joins across NoSQL collections",desc:"Document stores don't do joins efficiently. You end up with N+1 queries in application code. If you need joins, use SQL."},
@@ -60,7 +66,10 @@ const PHASE_DATABASE = {
        why:"Reading from a cache is 50–500× faster than reading from a database (0.1ms vs 5–50ms). If 90% of reads can be served from cache, you've removed 90% of the DB load — the difference between needing 5 DB nodes and needing 50. Cache also handles the 'hot key' problem: when 1M users read the same record, the cache absorbs it; the DB never sees the storm.",
        numbers:"Target hit rate: >80% on hot data, ideally >95%. Below 80% the cache is barely earning its complexity. Memory sizing: cache should hold the working set (the 20% of data accessed 80% of the time), not all data. TTL: minutes for fresh-ish data, hours for stable, never for derived/computed data without explicit invalidation. Cost: ElastiCache Redis ~$0.05/GB-hour ≈ $36/GB/month."
      },
-     tradeoffs:[{axis:"Hit rate vs Freshness",left:"Long TTL: stale data",right:"Short TTL: more DB hits",pos:0.5},{axis:"L1 (local) vs L2 (distributed)",left:"Faster, no network",right:"Shared, consistent",pos:0.5}],
+     tradeoffs:[
+       {axis:"Cache TTL",left:"Long TTL (hours): high hit rate, users see stale data until eviction",right:"Short TTL (seconds): fresh data, much higher origin DB load on misses"},
+       {axis:"Cache topology",left:"L1 in-process (per-instance map): sub-µs reads, every instance has its own copy and warms it independently",right:"L2 distributed (Redis, Memcached): shared across instances, consistent invalidation, +1ms network per read"}
+     ],
      pitfalls:[
        {name:"Cache stampede / thundering herd",desc:"A popular key expires; 10K concurrent requests all miss → all hit DB simultaneously → DB melts. Mitigations: probabilistic early refresh (refresh slightly before expiry), single-flight pattern (only one request rebuilds, others wait), staggered TTLs (jitter)."},
        {name:"Caching everything",desc:"If you cache rarely-read data, you spend memory for no gain. Cache only what's actually hot — measure with access frequency, not assumption."},
@@ -92,7 +101,10 @@ const PHASE_DATABASE = {
        why:"SQL LIKE '%foo%' does a full table scan and can't handle relevance, typos, stemming, or facets. Search engines (Elasticsearch (search and analytics engine), OpenSearch, Typesense) are 100–1000× faster on these workloads and offer features SQL fundamentally can't (BM25 ranking, fuzzy match, geo-spatial). They're also operationally heavier than a plain DB — only adopt when search is a real product feature.",
        numbers:"Postgres (PostgreSQL) full-text search: works well up to ~5M documents. Elasticsearch (search and analytics engine) cluster: 10K–100K queries/sec depending on complexity, indexing rate 10K–100K docs/sec. Latency: 10–50ms for typical queries on 10M+ documents. Shard sizing: 20–40GB per shard is the sweet spot."
      },
-     tradeoffs:[{axis:"Simplicity vs Power",left:"Postgres (PostgreSQL) FTS: no extra infra",right:"Elasticsearch (search and analytics engine): powerful, complex",pos:0.5},{axis:"Realtime vs Throughput",left:"Sync index: always fresh",right:"Async index: higher write throughput",pos:0.5}],
+     tradeoffs:[
+       {axis:"Search engine",left:"Postgres FTS (Full-Text Search): no extra infra, good for <1M docs and basic ranking",right:"Elasticsearch / OpenSearch: faceting, fuzzy matching, BM25, separate cluster to operate"},
+       {axis:"Index freshness",left:"Synchronous indexing in the write path: writes block until index updates, search is always fresh",right:"Asynchronous indexing pipeline: higher write throughput, search lags by seconds to minutes"}
+     ],
      pitfalls:[
        {name:"Search index as primary store",desc:"Elasticsearch (search and analytics engine) is durable in practice but designed for derived data. Treat it as a cache of search-shaped data, not source of truth. The DB is the truth; ES is the index."},
        {name:"Synchronous indexing in the write path",desc:"Every write to DB synchronously writes to ES. ES is slower and flakier; your writes inherit that. Use async indexing (CDC + queue) — accept brief search staleness."},

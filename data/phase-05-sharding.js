@@ -7,7 +7,10 @@ const PHASE_SHARDING = {
     why:"You shard because vertical scaling has run out — the biggest available machine can't hold or serve your data. You replicate because every machine eventually fails and you can't accept downtime when it does. Both come with serious costs: sharding eliminates joins across shards, complicates transactions, and requires careful key design. Replication introduces consistency questions (which copy is authoritative?) and operational overhead (failover, lag monitoring). Get either wrong and you'll have hot spots, data loss, or both.",
     numbers:"Rule of thumb: don't shard until you've exhausted vertical scaling and read replicas — vertical is typically 3–5× cheaper than horizontal in ops effort. Shard count: powers of 2 (16, 32, 64, 256) make rebalancing easier. Replication factor: typically 3 (one primary, two replicas) — survives 1–2 node failures. RPO (Recovery Point Objective) (data-loss tolerance): synchronous replication = 0; asynchronous = seconds-to-minutes worth of writes."
   },
-  tradeoffs:[{axis:"Operational simplicity vs Horizontal scale",left:"Single node: simple",right:"Sharded: complex but scalable",pos:0.5},{axis:"Strong consistency vs Availability",left:"Raft (consensus algorithm)/leader: correct",right:"Leaderless: always up",pos:0.5}],
+  tradeoffs:[
+    {axis:"Topology",left:"Single node: simple ops, ceiling at one machine's CPU/RAM/IOPS",right:"Sharded across N nodes: scales linearly with shards, routing and rebalancing complexity"},
+    {axis:"Consistency model",left:"Leader-based (Raft consensus): one writer per shard, strong consistency, brief unavailability during leader election",right:"Leaderless (Dynamo-style quorum): any replica accepts writes, always available, conflicts resolved at read time"}
+  ],
   pitfalls:[
     {name:"Sharding too early",desc:"You shard at 5K RPS because 'we'll grow.' Now every query needs cross-shard coordination, and most days you're at 1K RPS. Vertical-scale-first is almost always right; resharding later is hard but feasible."},
     {name:"Cross-shard transactions",desc:"Your shard key is user_id. A 'transfer money between users' transaction touches two shards. Distributed transactions (2PC (Two-Phase Commit)) are slow and fragile. Either: choose a shard key that keeps transactions local (e.g., account_id), or use saga pattern with compensating actions."},
@@ -29,7 +32,10 @@ const PHASE_SHARDING = {
        why:"This is the single most important decision in horizontal sharding. A bad shard key creates hot spots: 80% of writes hit one shard, the other shards idle, you've gained nothing from sharding. A good key spreads writes evenly while keeping related data on the same shard so common queries don't need to fan out. The tension between 'spread evenly' and 'keep together' is the core puzzle.",
        numbers:"Good key health: each shard within ±20% of average traffic. Bad key: one shard at 5–10× average = hot spot. Cardinality: shard key should have at least 10× more distinct values than shard count (so distribution is fine-grained). Cross-shard query rate: keep <10% of queries — beyond that, consider co-location or composite keys."
      },
-     tradeoffs:[{axis:"Query affinity vs Write uniformity",left:"Data together for queries",right:"Data spread for writes",pos:0.5},{axis:"Range scans vs Even distribution",left:"Range key: good scans",right:"Hash key: even writes",pos:0.5}],
+     tradeoffs:[
+       {axis:"Shard key strategy",left:"Group related rows on the same shard (e.g., by user_id): cheap multi-row queries, hot shards on celebrity users",right:"Spread rows uniformly: even write load, every multi-row query fans out across all shards"},
+       {axis:"Range vs hash key",left:"Range-partitioned (e.g., by timestamp): efficient range scans, time-bucket hotspots on recent writes",right:"Hash-partitioned: uniform write distribution, range scans require scatter-gather across all shards"}
+     ],
      pitfalls:[
        {name:"Monotonically increasing key (auto-increment, timestamp)",desc:"All new writes go to the same shard (the 'tail'). Other shards idle. Use hash of key, or composite with a high-cardinality entity ID."},
        {name:"Sharding by tenant when one tenant is huge",desc:"99 small tenants on 99 shards, 1 huge tenant on 1 shard handling 80% of traffic. The big tenant must itself be sub-sharded (composite key: tenant + sub-bucket)."},
@@ -56,7 +62,10 @@ const PHASE_SHARDING = {
        why:"Every disk fails eventually. Every machine eventually crashes. Replication determines whether that's a brief blip or an outage. Each model trades off three things: write latency (sync replication slows writes), failover speed (Raft (consensus algorithm) is seconds; manual is minutes), and consistency model (leader-based = strong, leaderless = eventual). Match to what your business actually needs.",
        numbers:"RPO (Recovery Point Objective) targets: backups-only RPO (Recovery Point Objective)~hours; async replication RPO (Recovery Point Objective)~seconds; sync replication RPO (Recovery Point Objective)=0. RTO (Recovery Time Objective) targets: manual failover ~30 min; automated multi-AZ ~30–60s; Raft (consensus algorithm) auto-election ~5–10s. Replication factor 3 is the standard sweet spot — survives 1–2 node failures, doesn't waste 4+ copies of every write."
      },
-     tradeoffs:[{axis:"Durability vs Write latency",left:"Sync replication: no data loss",right:"Async: faster writes",pos:0.5},{axis:"Leader-based vs Leaderless",left:"Raft (consensus algorithm): consistent",right:"Quorum: always available",pos:0.5}],
+     tradeoffs:[
+       {axis:"Replication mode",left:"Synchronous replication: writes ack only after replicas confirm; zero data loss on failover, +5–30ms write latency",right:"Asynchronous replication: low write latency; last few seconds of writes can be lost if the primary dies"},
+       {axis:"Coordination model",left:"Leader-based (Raft): one elected writer, consistent, brief unavailability during leader election",right:"Quorum-based (Dynamo): any node writes if quorum agrees, always available, replicas may briefly diverge"}
+     ],
      pitfalls:[
        {name:"Replication lag in monitoring blind spot",desc:"Replica is 30 minutes behind primary; reads are 30 min stale; you find out from a customer support ticket. Always monitor replication lag explicitly; alert when it exceeds expected."},
        {name:"Failover during a network blip",desc:"Brief network glitch triggers automatic failover; old primary recovers, now you have two primaries (split-brain) writing conflicting data. Use proper consensus (Raft (consensus algorithm)) or fencing tokens to prevent."},
@@ -87,7 +96,10 @@ const PHASE_SHARDING = {
        why:"Without a routing layer, every client has to know the entire shard map and update it whenever you reshard — operational nightmare. With centralized routing, you've added a hop (latency + failure point). The right pattern depends on shard count and latency budget. The routing layer must itself be highly available — if it goes down, you've replaced one SPOF with another.",
        numbers:"Latency overhead: stateless proxy adds 1–2ms per hop. Smart client: 0 hops, 0ms overhead but client complexity. Topology change propagation: gossip ~1s, ZooKeeper ~100ms, smart client refresh on MOVED redirect ~immediate. Routing throughput: proxies handle 100K–1M RPS; gossip and smart clients are limited only by individual nodes."
      },
-     tradeoffs:[{axis:"Centralized vs Distributed routing",left:"Proxy: simple ops",right:"Gossip: no SPOF",pos:0.5},{axis:"Routing freshness vs Latency",left:"Always current: slower",right:"Cached: occasional stale",pos:0.5}],
+     tradeoffs:[
+       {axis:"Routing topology",left:"Centralized proxy (Vitess, ProxySQL): one place to manage routing rules; the proxy is a single point of failure",right:"Gossip-based (Cassandra ring): every node knows the topology, no proxy hop, more chatter on the wire"},
+       {axis:"Routing freshness",left:"Look up the shard map on every request: always current, +1ms lookup",right:"Cache the shard map in clients: zero lookup latency, occasional misroutes for a few seconds after a rebalance"}
+     ],
      pitfalls:[
        {name:"Proxy as bottleneck",desc:"All traffic flows through proxy tier; proxy CPU saturates first. Always: scale proxies horizontally (multiple instances behind LB), or move to smart-client/gossip."},
        {name:"Stale shard map after resharding",desc:"You moved data from shard 5 to shard 12; clients/proxies still route to shard 5. Either: route by query first to old shard which forwards to new (during migration), or atomic cutover with synchronized map update."},
