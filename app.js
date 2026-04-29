@@ -733,6 +733,7 @@ document.getElementById("search").oninput = function () {
     activeExample = examples.find(e => e.id === sel.value) || null;
     persist.saveExample(sel.value);
     renderOverview();
+    if (window._syncDiagramBtn) window._syncDiagramBtn();
     if (selectedNode) showDetail(selectedNode);
   };
 
@@ -771,6 +772,7 @@ document.getElementById("search").oninput = function () {
         activeExample = added[0];
         persist.saveExample(sel.value);
         renderOverview();
+        if (window._syncDiagramBtn) window._syncDiagramBtn();
         if (selectedNode) showDetail(selectedNode);
       };
       reader.readAsText(file);
@@ -778,6 +780,105 @@ document.getElementById("search").oninput = function () {
       this.value = "";
     };
   }
+})();
+
+// ══════════════════════════════════════════════════════════════
+// ARCHITECTURE DIAGRAM MODAL
+// ══════════════════════════════════════════════════════════════
+
+(function initDiagramModal() {
+  const btn      = document.getElementById("example-diagram-btn");
+  const modal    = document.getElementById("diagram-modal");
+  const closeBtn = document.getElementById("diagram-modal-close");
+  const title    = document.getElementById("diagram-modal-title");
+  const body     = document.getElementById("diagram-modal-body");
+  if (!btn || !modal || !closeBtn || !body) return;
+
+  mermaid.initialize({ startOnLoad: false, theme: "dark", securityLevel: "loose" });
+
+  let dZoom = null, dSvg = null, dG = null;
+
+  function fitDiagram() {
+    if (!dSvg || !dG || !dZoom) return;
+    const svgNode = dSvg.node();
+    if (!svgNode) return;
+    const vb = svgNode.viewBox?.baseVal;
+    if (!vb || !vb.width || !vb.height) return;
+    const bodyRect = body.getBoundingClientRect();
+    const vw = bodyRect.width, vh = bodyRect.height;
+    if (!vw || !vh) return;
+    const pad = 32;
+    const scale = Math.min((vw - pad) / vb.width, (vh - pad) / vb.height);
+    const tx = vw / 2 - scale * (vb.x + vb.width / 2);
+    const ty = vh / 2 - scale * (vb.y + vb.height / 2);
+    dSvg.call(dZoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
+  }
+
+  document.getElementById("diagram-zi").onclick  = () => dSvg && dSvg.transition().call(dZoom.scaleBy, 1.4);
+  document.getElementById("diagram-zo").onclick  = () => dSvg && dSvg.transition().call(dZoom.scaleBy, 0.7);
+  document.getElementById("diagram-fit").onclick = fitDiagram;
+
+  function syncBtn() {
+    btn.style.display = (activeExample?.diagram) ? "block" : "none";
+  }
+  window._syncDiagramBtn = syncBtn;
+
+  let lastExampleRef = null;
+
+  async function openModal() {
+    if (!activeExample?.diagram) return;
+    title.textContent = `${activeExample.icon || "📦"} ${activeExample.name} — Architecture`;
+    modal.classList.add("open");
+    document.body.style.overflow = "hidden";
+
+    if (lastExampleRef === activeExample) return;
+    lastExampleRef = activeExample;
+
+    body.innerHTML = "<div style='color:#475569;font-size:12px;padding:24px'>Rendering diagram…</div>";
+    dSvg = null; dG = null; dZoom = null;
+
+    try {
+      const uid = "mmd-" + Date.now();
+      const { svg: svgStr } = await mermaid.render(uid, activeExample.diagram.trim());
+      body.innerHTML = svgStr;
+
+      const svgEl = body.querySelector("svg");
+      if (!svgEl) throw new Error("No SVG in output");
+
+      svgEl.removeAttribute("width");
+      svgEl.removeAttribute("height");
+      svgEl.style.width  = "100%";
+      svgEl.style.height = "100%";
+      svgEl.style.display = "block";
+
+      const wrapper = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      Array.from(svgEl.childNodes).forEach(child => wrapper.appendChild(child));
+      svgEl.appendChild(wrapper);
+
+      dSvg  = d3.select(svgEl);
+      dG    = d3.select(wrapper);
+      dZoom = d3.zoom().scaleExtent([0.08, 8]).on("zoom", e => dG.attr("transform", e.transform));
+
+      dSvg.call(dZoom).on("dblclick.zoom", null);
+      setTimeout(fitDiagram, 100);
+    } catch (err) {
+      body.innerHTML = `<div style="color:#f87171;font-size:12px;padding:20px;font-family:monospace">Failed to render: ${err.message}</div>`;
+    }
+  }
+
+  function closeModal() {
+    modal.classList.remove("open");
+    document.body.style.overflow = "";
+  }
+
+  btn.onclick      = openModal;
+  closeBtn.onclick = closeModal;
+
+  modal.addEventListener("click", e => { if (e.target === modal) closeModal(); });
+
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && modal.classList.contains("open")) closeModal();
+  });
 })();
 
 /* SIDEBAR COLLAPSE/EXPAND */
@@ -1020,6 +1121,7 @@ function resetState() {
   if (sel) sel.value = "";
   const overview = document.getElementById("example-overview");
   if (overview) { overview.innerHTML = ""; overview.classList.remove("active"); }
+  if (window._syncDiagramBtn) window._syncDiagramBtn();
 
   render();
   fitView();
@@ -1060,6 +1162,9 @@ if (savedExampleId) {
     }
   }
 }
+
+// Sync diagram button visibility after example restore
+if (window._syncDiagramBtn) window._syncDiagramBtn();
 
 // 3. Restore selected node before render (so highlight is drawn on first pass)
 const savedNodeId    = persist.load(PERSIST_KEYS.node);

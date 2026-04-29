@@ -27,6 +27,7 @@
         </label>
         <div id="example-upload-error"></div>
         <div id="example-overview"></div>
+        <button id="example-diagram-btn" style="display:none" title="View architecture diagram">🗺 Architecture Diagram</button>
       </div>
 
       <div id="legend">
@@ -71,7 +72,24 @@
     </div>
   </div>
 
+  <!-- Architecture diagram modal -->
+  <div id="diagram-modal" role="dialog" aria-modal="true" aria-label="Architecture Diagram">
+    <div id="diagram-modal-inner">
+      <div id="diagram-modal-hdr">
+        <span id="diagram-modal-title">Architecture Diagram</span>
+        <div id="diagram-zoom-ctrls">
+          <button class="dzc" id="diagram-zi" title="Zoom in">+</button>
+          <button class="dzc" id="diagram-zo" title="Zoom out">−</button>
+          <button class="dzc" id="diagram-fit" title="Fit to window">↺</button>
+        </div>
+        <button id="diagram-modal-close" aria-label="Close diagram">×</button>
+      </div>
+      <div id="diagram-modal-body"></div>
+    </div>
+  </div>
+
   <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
   <script src="data/phase-01-requirements.js"></script>
   <script src="data/phase-02-architecture.js"></script>
   <script src="data/phase-03-api.js"></script>
@@ -96,6 +114,7 @@
 
   <!-- Example plugins (modular — add new examples here) -->
   <script src="examples/_registry.js"></script>
+  <script src="examples/dc-telemetry.js"></script>
 
   <script src="app.js"></script>
 </body>
