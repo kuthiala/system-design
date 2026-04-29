@@ -150,13 +150,16 @@ html,body{height:100%;overflow:hidden;background:#080b14;font-family:'Segoe UI',
 .tool{font-size:9px;background:#0f1623;border:1px solid #1e2433;border-radius:4px;padding:2px 6px;color:#7c5af6}
 
 /* Tradeoff axes */
-.ta{margin-bottom:10px}
-.ta-name{font-size:10px;color:#475569;margin-bottom:5px}
-.ta-bar{display:flex;align-items:center;gap:8px}
-.ta-l,.ta-r{font-size:10px;color:#64748b;width:85px;flex-shrink:0}
+.ta{margin-bottom:14px}
+.ta-name{font-size:11px;font-weight:600;color:#94a3b8;margin-bottom:8px;letter-spacing:.3px}
+.ta-labels{display:flex;justify-content:space-between;margin-bottom:5px}
+.ta-l,.ta-r{font-size:9px;color:#64748b;max-width:44%;line-height:1.35}
 .ta-r{text-align:right}
-.ta-track{flex:1;height:3px;border-radius:2px;position:relative}
-.ta-mk{position:absolute;width:9px;height:9px;border-radius:50%;top:-3px;border:2px solid #7c5af6;background:#0d1117;transform:translateX(-50%)}
+.ta-arrows{display:flex;justify-content:space-between;margin-bottom:3px}
+.ta-arrow-l,.ta-arrow-r{font-size:9px;color:#334155}
+.ta-track-wrap{position:relative;padding:6px 0}
+.ta-track{width:100%;height:5px;border-radius:3px;position:relative;background:linear-gradient(to right,#1e3a5f,#312060)}
+.ta-mk{position:absolute;width:11px;height:11px;border-radius:50%;top:-3px;border:2px solid #a78bfa;background:#0d1117;transform:translateX(-50%);box-shadow:0 0 0 3px rgba(124,90,246,0.18);transition:left .15s}
 
 /* Level up */
 .lu{background:#0a0d14;border:1px solid #1e2433;border-radius:7px;padding:9px 11px;margin-bottom:7px}

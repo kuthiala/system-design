@@ -334,13 +334,23 @@ function buildSizeCards(cfg) {
 
 function buildTradeoffs(tradeoffs) {
   const items = tradeoffs.map(t => {
-    const pct = (t.pos ?? 0.5) * 100;
+    const pos = t.pos ?? 0.5;
+    const pct = pos * 100;
+    // left side is favored when pos < 0.5, right when pos > 0.5
+    const leftOp  = pos < 0.5 ? 1 : 0.45;
+    const rightOp = pos > 0.5 ? 1 : 0.45;
     return `<div class="ta">
-      <div class="ta-name">${t.axis}</div>
-      <div class="ta-bar">
-        <div class="ta-l">${t.left}</div>
+      <div class="ta-name">↔ ${t.axis}</div>
+      <div class="ta-labels">
+        <div class="ta-l" style="opacity:${leftOp}">${t.left}</div>
+        <div class="ta-r" style="opacity:${rightOp}">${t.right}</div>
+      </div>
+      <div class="ta-track-wrap">
         <div class="ta-track"><div class="ta-mk" style="left:${pct}%"></div></div>
-        <div class="ta-r">${t.right}</div>
+      </div>
+      <div class="ta-arrows">
+        <div class="ta-arrow-l">← more this</div>
+        <div class="ta-arrow-r">more this →</div>
       </div>
     </div>`;
   }).join("");
