@@ -7,7 +7,10 @@ const PHASE_STORAGE = {
     why:"Binary data doesn't belong in your database. A 5MB image stored as a Postgres BLOB bloats the table, kills cache effectiveness, slows backups by 10×, and costs ~10× more per GB than S3. Object storage solves this: cheap, infinite, designed for the access pattern. Adding a CDN in front then makes those files fast globally — the CDN serves the 95% of requests for popular files from edge POPs at <10ms, while origin (S3) handles only the long tail.",
     numbers:"S3 cost: ~$0.023/GB/month standard; $0.004/GB/month for Glacier Deep Archive. Database storage: $0.10–0.20/GB/month. CDN cache hit ratio target: >90%; reduces origin load by that factor. S3 durability: 11 nines (99.999999999%) — designed to lose <1 object per 10K objects per 10M years. Pre-signed URLs (client uploads directly to S3) eliminate proxying through your servers — saves bandwidth and latency."
   },
-  tradeoffs:[{axis:"Cost vs Latency",left:"Origin: cheap but slower",right:"CDN: expensive but fast",pos:0.5},{axis:"Durability vs Cost",left:"Multi-region: safer, $$",right:"Single region: cheaper",pos:0.5}],
+  tradeoffs:[
+    {axis:"Origin vs edge serving",left:"Serve from origin S3 only: cheapest egress, 100–300ms for distant users",right:"CDN at every PoP: $$$ per GB cached, 5–30ms latency globally"},
+    {axis:"Replication scope",left:"Replicated across regions: 11 nines durability, ~2× storage cost, survives region loss",right:"Single region: cheaper, region-wide outage = data unavailable until restore"}
+  ],
   pitfalls:[
     {name:"Proxying file uploads through your app",desc:"User uploads 100MB video → your app receives it → forwards to S3. You pay for double bandwidth and your app servers' RAM/CPU. Use S3 pre-signed POST URLs so client uploads directly to S3."},
     {name:"Public S3 bucket leaks",desc:"The most common cloud security incident: a bucket accidentally made public, leaks customer data. Default to private; use CloudFront/CDN with signed URLs for public-ish access. Enable AWS Block Public Access at account level."},

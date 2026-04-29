@@ -7,7 +7,10 @@ const PHASE_NETWORKING = {
     why:"Network is the last mile of latency, and the first mile of unreliability. A perfectly tuned backend served from us-east-1 still adds 150ms for a user in Singapore — no application code change can help. CDN closes that gap by caching at POPs near users. Service mesh makes internal calls observable and secure without per-service work. HTTP/3 (HyperText Transfer Protocol version 3) reclaims latency on flaky mobile networks. Underinvest here and your fast app feels slow; overinvest and you maintain infrastructure you don't need.",
     numbers:"Speed of light in fiber: ~5ms per 1000km, with ~2× for routing/queueing in practice. NYC↔London: ~70ms RTT minimum. CDN cache hit latency: 5–30ms from any user globally. HTTP/2 (HyperText Transfer Protocol version 2) saves ~1 RTT vs HTTP/1.1 (HyperText Transfer Protocol version 1.1) (multiplexing). HTTP/3 (HyperText Transfer Protocol version 3) (QUIC (Quick UDP Internet Connections) over UDP) saves another RTT on connection setup and eliminates TCP head-of-line blocking — major win on mobile (10–30% faster page loads)."
   },
-  tradeoffs:[{axis:"Simplicity vs Performance",left:"Single endpoint: simple",right:"Anycast: complex, fast",pos:0.5},{axis:"Cost vs Coverage",left:"Fewer PoPs (Points of Presence): cheaper",right:"More PoPs (Points of Presence): lower latency",pos:0.5}],
+  tradeoffs:[
+    {axis:"Edge routing strategy",left:"Single global endpoint behind GeoDNS: simple ops, latency varies 100–300ms by user location",right:"Anycast IPs across regions: lowest latency per user, BGP peering and capacity tuning required"},
+    {axis:"Point of Presence (PoP) coverage",left:"5–10 PoPs: cheaper to peer and manage, far users see 100–300ms",right:"100+ PoPs: <30ms latency anywhere, expensive per-network peering and operations"}
+  ],
   pitfalls:[
     {name:"No CDN for static assets",desc:"Your JS bundle (500KB) downloaded from us-east-1 is 500ms to a user in India. Same bundle from a CDN POP in Mumbai is 30ms. CDN for static assets is universally correct — there's no reason not to."},
     {name:"TLS termination only at LB, then plaintext internally",desc:"Traffic is encrypted to the LB, then plaintext between services. An attacker inside your VPC can sniff everything. Use mTLS (mutual Transport Layer Security) via service mesh — encrypt the entire request path."},

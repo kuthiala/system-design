@@ -7,7 +7,10 @@ const PHASE_OBSERVABILITY = {
     why:"You cannot fix what you cannot see. Without observability, an outage is detective work — SSH into machines, grep logs, guess. With it, you have dashboards and alerts that point you at the cause within minutes. The difference between a 5-minute incident and a 5-hour incident is almost entirely observability quality. It also pays for itself in capacity planning (knowing when you'll run out) and feature velocity (catching regressions before customers do).",
     numbers:"SRE rule for SLO alerting: alert when burning the error budget at >2× normal rate over 1 hour (slow burn) OR >14× over 5 minutes (fast burn). Catches both gradual degradation and sudden outages without alerting on every blip. Trace sampling: 100% at small scale, 1–10% at medium, <1% at hyper (storage cost dominates). Metrics cardinality: keep label combinations <1M total or your TSDB (Time Series Database) explodes."
   },
-  tradeoffs:[{axis:"Data volume vs Cost",left:"More data: more insight",right:"More data: more cost",pos:0.5},{axis:"Precision vs Overhead",left:"Full tracing: complete picture",right:"Sampling: lower overhead",pos:0.5}],
+  tradeoffs:[
+    {axis:"Telemetry retention & scope",left:"Capture every metric, log, trace at full fidelity: deep insight into rare issues, $$$/month at scale",right:"Aggressive aggregation and short retention: low cost, harder to debug infrequent failures"},
+    {axis:"Tracing fidelity",left:"100% trace sampling: every request fully captured, +5–10% CPU overhead, GB/s of storage required",right:"Probabilistic or tail-based sampling: <1% overhead, misses most successful paths, catches tail errors"}
+  ],
   pitfalls:[
     {name:"Threshold-based alerting hellscape",desc:"You alert on 'CPU >80%'. CPU spikes during a benign batch job at 3am. On-call gets paged. They tune to 90%. Now real outages don't fire. Use SLO-based alerting (alert on user-impacting error rate / latency, not infrastructure)."},
     {name:"Logs as primary debugging tool at scale",desc:"50 services × 1M req/day = 500M log lines/day. Grep is dead. Move to metrics for known questions and traces for 'why is this request slow.' Logs become evidence, not the primary tool."},

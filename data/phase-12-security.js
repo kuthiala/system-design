@@ -7,7 +7,10 @@ const PHASE_SECURITY = {
     why:"Security failures are existential, not just expensive. A breach doesn't just cost money (avg cost ~$4.5M per IBM 2023) — it costs trust, customers, and sometimes the company. The cheapest time to add security is the first day; it's exponentially more expensive to retrofit. The good news: 90% of breaches come from the same handful of mistakes (weak auth, unpatched systems, leaked secrets, misconfigured cloud). Cover those well and you're ahead of most companies your size.",
     numbers:"Password hashing: bcrypt cost factor ≥12 (~300ms/hash) makes brute force infeasible. Token expiry: access tokens 15min, refresh tokens 7–30 days, hardware-backed sessions for sensitive ops. Auth endpoint rate limit: 5 attempts/min/IP. TLS: nothing below TLS 1.2; prefer 1.3. Secrets rotation: 90 days for API keys, 1 year for service accounts, immediately on suspected exposure. MFA reduces account takeover by ~99% (Microsoft data)."
   },
-  tradeoffs:[{axis:"Security vs UX",left:"Strict: more friction",right:"Permissive: better UX",pos:0.5},{axis:"Custom vs Standard",left:"Custom: full control",right:"Standards: fewer bugs",pos:0.5}],
+  tradeoffs:[
+    {axis:"Auth strictness",left:"MFA on every action, short sessions, IP pinning: low risk, frustrated users, reduced adoption",right:"Long-lived cookies, no MFA: smooth experience, account takeover blast radius is large"},
+    {axis:"Implementation approach",left:"Roll your own auth: tailored to your model, easy to introduce subtle critical bugs",right:"Use OAuth2/OIDC libraries or managed auth (Auth0, Cognito): standard flows, fewer footguns"}
+  ],
   pitfalls:[
     {name:"Rolling your own crypto/auth",desc:"You think you can implement OAuth2 / JWT / password storage 'simply.' You will get it wrong in subtle ways (timing attacks, token confusion, session fixation). Use Auth0, Clerk, Cognito, or a battle-tested library. Crypto/auth is one of the few areas to never DIY."},
     {name:"Secrets in environment variables, then in git",desc:"You start with .env files. Someone commits one to a public repo. Now your AWS keys are on GitHub for 12 minutes before bots find them, then $40K of crypto mining hits your bill. Use a secrets manager (Vault, AWS Secrets Manager, Doppler) from day 1."},

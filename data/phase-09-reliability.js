@@ -7,7 +7,10 @@ const PHASE_RELIABILITY = {
     why:"Failure is inevitable; outages are a choice. Every disk fails eventually. Every server crashes eventually. Every region has had multi-hour outages (us-east-1 most famously). The only question is whether your system has been designed to survive these events without your customers noticing — or whether you'll spend hours doing manual recovery while revenue bleeds. Each level of reliability roughly doubles cost: single-AZ → multi-AZ ($$), multi-region passive ($$$), multi-region active ($$$$). Buy what your business case justifies.",
     numbers:"MTTR (Mean Time To Recovery) (Mean Time To Recovery) targets by tier: small <4h, medium <30min, large <5min, hyper <30s. RPO (data loss) targets: backups-only=hours, async replication=seconds-minutes, sync replication=0. Industry benchmarks: AWS region-level outage probability is roughly 1 per region per 1–3 years. Multi-AZ failover: ~30–60s automated. Multi-region failover: 5–15 min if practiced, much longer if not."
   },
-  tradeoffs:[{axis:"Cost vs Resilience",left:"Single region: cheap",right:"Multi-region: expensive",pos:0.5},{axis:"RTO vs Complexity",left:"Fast recovery: complex failover",right:"Simple: slow recovery",pos:0.5}],
+  tradeoffs:[
+    {axis:"Disaster posture",left:"Single region: cheapest, region outage = full downtime until restore",right:"Multi-region active-active: ~2–3× infra cost, survives a region loss without failover"},
+    {axis:"Recovery Time Objective (RTO)",left:"Sub-minute RTO: automated health checks, DNS scripting, regular failover drills",right:"Hours-of-RTO: manual restore from backup, simple runbook, extended downtime per incident"}
+  ],
   pitfalls:[
     {name:"Untested DR plan",desc:"Runbook says 'failover to us-west-2' — but it's never been tried. The day of the actual outage, you discover the IAM roles aren't configured, the DB snapshot is 12 hours stale, and DNS TTLs are 1 hour. Practice DR quarterly with real failovers."},
     {name:"Single region 'because it's HA'",desc:"Multi-AZ is not multi-region. AWS us-east-1 has had multi-hour control-plane outages where Multi-AZ couldn't help. If your business needs >99.95%, you need multi-region — full stop."},
@@ -37,7 +40,9 @@ const PHASE_RELIABILITY = {
        why:"Without circuit breakers, a slow downstream causes thread/connection pool exhaustion in your service: each waiting call holds a thread, threads run out, your service starts rejecting healthy traffic. The slow downstream cascaded into your outage. With breakers, you fail fast: take 1ms to return an error, free the thread, serve other requests, return a graceful fallback to users. Your service stays healthy while the dependency is sick.",
        numbers:"Typical thresholds: open after 50% failure rate over a 10-second sliding window with min 20 requests. Half-open probe rate: 1 request per 5 seconds. Close after 5 consecutive successes. Timeout setting: 95th percentile of healthy latency × 1.5. Effect: a downstream that goes 100% bad costs you ~10s of degradation (until breaker opens) instead of unbounded cascading failure."
      },
-     tradeoffs:[{axis:"Availability vs Correctness",left:"Fallback data: available",right:"Real data: correct",pos:0.5}],
+     tradeoffs:[
+       {axis:"Behavior on dependency failure",left:"Serve degraded/cached fallback: page stays up, data may be stale or synthetic",right:"Fail closed with error: never show wrong data, users see error pages until upstream recovers"}
+     ],
      pitfalls:[
        {name:"No fallback when breaker opens",desc:"Breaker opens → calls fail with 'circuit open' error → your service surfaces this to users. Now they get explicit errors instead of slowness. Define a fallback: cached data, default value, or graceful degradation (e.g., 'recommendations unavailable, showing trending'). Breakers without fallbacks are half-built."},
        {name:"Breaker per-instance instead of per-dependency",desc:"Each replica of your service has its own breaker; one replica trips while others don't. The downstream service sees a 50% drop, not a clean off. Use distributed breakers (service mesh, shared state) for clean cutover."},

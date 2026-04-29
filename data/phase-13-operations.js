@@ -7,7 +7,10 @@ const PHASE_OPERATIONS = {
     why:"Deploy frequency is the strongest predictor of software quality (DORA (DevOps Research and Assessment) research). Counter-intuitively: teams that deploy many times a day have fewer outages than teams that deploy once a month. Why? Small changes are easier to debug. Frequent practice makes the deploy process battle-tested. Auto-rollback on errors works because errors are quickly noticed. Teams that deploy rarely accumulate risk into giant releases that explode on contact with reality.",
     numbers:"DORA (DevOps Research and Assessment) elite tier benchmarks: deploy frequency >1/day per service, change failure rate <15%, MTTR (Mean Time To Recovery) <1h, lead time <1h. Mid tier: deploy weekly, 16–30% failure, MTTR (Mean Time To Recovery) <1 day. Low tier: deploy monthly, 31–45% failure, MTTR (Mean Time To Recovery) >1 week. The gap between elite and low is roughly 200× in deploy frequency and similarly large in incident metrics."
   },
-  tradeoffs:[{axis:"Speed vs Safety",left:"Fast deploys: risk",right:"Slow deploys: safe",pos:0.5},{axis:"Automation vs Control",left:"Full auto: faster",right:"Manual gates: safer",pos:0.5}],
+  tradeoffs:[
+    {axis:"Deploy cadence",left:"Continuous deploy on green CI: minutes from merge to prod, 1% chance of incident per change",right:"Weekly batched releases with QA: safe, slow, giant diffs make rollback ambiguous"},
+    {axis:"Pipeline gating",left:"Fully automated promotion: human-out-of-the-loop, fastest cycle time, hidden failures",right:"Manual approval gates per stage: clear accountability, breaks flow when reviewers sleep"}
+  ],
   pitfalls:[
     {name:"Manual deployment steps",desc:"Anything in your deploy that requires a human ('SSH in and run this') will eventually be done wrong at 3am. Automate everything. If you can't automate, document brutally and rotate the runbook user."},
     {name:"No rollback plan",desc:"Deploy fails → take the site down for 2 hours while you fix forward. Always: every deploy must be reversible in <5 minutes. Database migrations: expand-contract so old code works with new schema. Code: keep last-known-good binary one click away."},

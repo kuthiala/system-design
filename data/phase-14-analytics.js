@@ -7,7 +7,10 @@ const PHASE_ANALYTICS = {
     why:"OLAP queries are silent killers when run against your transactional DB. A single 'SELECT SUM(amount) GROUP BY date' over 100M rows can saturate disk I/O for minutes — your users see latency spikes, your error rate climbs, all because the analyst clicked Refresh on a dashboard. Separation isn't optional past medium scale; it's table stakes. Column-oriented analytical stores (BigQuery, Snowflake, Redshift) also process those queries 10–100× faster than row stores by reading only the columns needed.",
     numbers:"Performance gap: an aggregation query on 100M rows takes ~30s on Postgres, ~1s on BigQuery — and BigQuery scales linearly to PB while Postgres falls over at TB. Cost gap: warehouse storage ~$20/TB/month, queries pay-per-scan. ETL latency: nightly batch (24h staleness) is fine for most BI; CDC (change data capture) gets you minutes of staleness; streaming (Kafka + Flink) gets sub-second. Pick the slowest acceptable — each step up costs significantly more."
   },
-  tradeoffs:[{axis:"OLAP vs OLTP",left:"Analytics: column store",right:"Transactional: row store",pos:0.5},{axis:"Realtime vs Batch",left:"Streaming analytics",right:"Batch ETL: simpler",pos:0.5}],
+  tradeoffs:[
+    {axis:"Storage engine",left:"OLAP column store (BigQuery, Snowflake): scans billions of rows for aggregates, terrible for single-row updates",right:"OLTP row store (Postgres, MySQL): fast point lookups and writes, slow on full-table aggregates"},
+    {axis:"ETL pipeline cadence",left:"Streaming (Kafka + Flink): seconds-fresh dashboards, complex state management and infrastructure",right:"Batch nightly job: hours-stale data, simple and idempotent, cheap"}
+  ],
   pitfalls:[
     {name:"Running BI queries against the production DB",desc:"Easy and free at first. Then a finance dashboard with 5 nested CTEs runs every 15 minutes and your p99 latency doubles. Always: separate analytical from transactional storage past 1M rows or any complex aggregation."},
     {name:"ETL that breaks silently",desc:"Nightly export job fails for 3 days; nobody notices because the dashboards still show data (just stale). Always: data freshness monitoring + alert if last-updated-at is older than expected. Treat data pipelines like production services."},
