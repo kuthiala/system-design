@@ -11,6 +11,7 @@
     "hyper"
   ],
   "short": "Polling → WebSocket → SSE → custom protocols at edge — making your application feel alive",
+  "tldr": "Real-time means the server pushes data the moment it changes instead of the client asking. The transport ladder is polling, long-polling, SSE, WebSocket, and QUIC-based protocols. Behind the transport sits a pub/sub backplane that routes messages across gateway nodes, and for collaboration, a merge algorithm (OT or CRDT).",
   "keyInsight": "Real-time is the difference between a 'page' and an 'experience.' When data arrives as it happens — a new message, a cursor moving, a stock price changing, a deployment completing — the application feels alive and responsive. Without real-time, users manually refresh and see stale data, workflows depend on 'did you see the email?' instead of live notifications, and collaboration requires taking turns instead of working simultaneously. But real-time infrastructure has fundamentally different scaling characteristics than request-response HTTP: instead of handling discrete requests and forgetting clients between them, you maintain persistent connections to every online user simultaneously. 10K concurrent connections is a single server; 1M concurrent connections is a distributed system with its own sharding, routing, and failure modes. The critical engineering question is: how many concurrent connections will you have at peak, and what's the fan-out pattern (1:1 like chat, 1:1000 like notifications, or 1:1M like a live sports score)?",
   "mentalModel": "Think of the difference between a mailbox and a phone call. HTTP request-response is a mailbox: you send a letter (request), wait for a reply (response), get it sometime later. You have no idea if something has changed until you check the mailbox again (polling). WebSocket is a phone call: you establish a connection, and both parties can speak or listen at any time in real-time. The connection stays open as long as needed. The engineering cost: maintaining a mailbox for 1M users is trivial (the mailbox just sits there). Maintaining a phone call with 1M users simultaneously requires 1M active phone lines — each consuming memory, CPU, and a network socket on your server. This is why real-time infrastructure is qualitatively different from request-response infrastructure: the cost is proportional to concurrent users, not to requests per second.",
   "detail": {
@@ -90,6 +91,34 @@
       "action": "Edge real-time infrastructure. (1) Deploy WebSocket gateways at edge PoPs worldwide (Cloudflare Durable Objects for stateful edge, or your own WebSocket servers in multiple regions behind anycast). Users connect to the nearest PoP — their connection latency is 5–30ms instead of 50–300ms for a centralized server. (2) Geo-routed pub/sub: when a message is published, it's first delivered to local subscribers (same PoP, <5ms), then replicated to other PoPs for their local subscribers (cross-region, 30–80ms). This gives local users instant delivery while global users get acceptable latency. (3) CRDT for collaborative state: if you have collaborative editing features, adopt CRDTs (Yjs is the leading open-source library — supports text, JSON, arrays, maps as mergeable data types). CRDTs eliminate the need for a central coordination server — each client and each edge node can independently accept writes and merge them deterministically. This means collaboration works even during network partitions. (4) WebTransport for latency-critical applications: WebTransport (over HTTP/3/QUIC) eliminates TCP's head-of-line blocking problem. In TCP, if one packet is lost, all subsequent packets are delayed until the lost one is retransmitted — even if they're independent messages. QUIC (UDP-based) allows independent streams, so a lost packet in stream A doesn't delay stream B. This reduces jitter by 20–40% on lossy mobile networks. Browser support: Chrome and Edge (2023+), Firefox (behind flag), Safari (not yet). (5) Hybrid fan-out: for topics with <1K subscribers, use push (fan-out-on-write). For topics with >1K subscribers (broadcast channels, popular events), use pull-on-invalidate (push a lightweight 'new data available' signal, client pulls full payload on next render). This prevents CPU exhaustion from massive fan-out. Technologies: Cloudflare Durable Objects (stateful edge compute — each 'object' is a single-threaded actor at an edge PoP, perfect for per-room/per-document real-time state), Liveblocks (managed collaborative infrastructure — handles presence, storage, and CRDT synchronization as a service), custom QUIC implementations (quic-go for Go, msquic for C++/Rust)."
     }
   ],
+  "interview": {
+    "prompt": "Chat, notifications, live dashboards, collaborative editing: 'how does the update reach the other user?' is the question.",
+    "senior": "Uses WebSockets with a gateway tier, Redis pub/sub to fan out across gateways, and a message store for history and offline users.",
+    "staff": "Chooses transport by direction and environment (SSE for one-way, WebSocket for two-way, with long-poll fallback) and designs the connection tier as stateful but disposable: connection registry, heartbeats, graceful drain on deploy, and jittered reconnect to prevent thundering herds. Separates the fan-out problem (pub/sub backplane with topic routing, not broadcast to every node) from the durability problem (a message log so offline clients catch up by cursor). Handles backpressure per connection so one slow client cannot exhaust memory. Does the math on fan-out for large rooms and celebrity cases, and uses hierarchical or batched delivery. For collaboration, picks OT or CRDT based on the data type and offline needs. Sizes by concurrent connections per node (tens of thousands to a million) and memory per connection.",
+    "probes": [
+      "A gateway node deploys. What do its 50,000 connections experience?",
+      "A room has 100,000 members and someone posts. Trace the message to every screen and count the work.",
+      "A client is on a slow mobile link and falls 10 seconds behind. What does the server do?"
+    ]
+  },
+  "quiz": [
+    {
+      "q": "What is a thundering herd reconnect and how do you prevent it?",
+      "a": "A gateway restart drops all its connections at once and every client reconnects in the same second, overwhelming the remaining gateways and the auth system. Prevent with randomized reconnect backoff with jitter, draining connections gradually before shutdown, and connection admission limits."
+    },
+    {
+      "q": "Why is Redis pub/sub insufficient as the backplane at scale?",
+      "a": "It broadcasts every message to every subscribed gateway node regardless of whether that node has an interested client, so traffic grows with nodes times messages, and it has no persistence, so a disconnected client misses messages. At scale you need topic-aware routing and a durable log for catch-up."
+    },
+    {
+      "q": "What is backpressure in a real-time system?",
+      "a": "The mechanism by which a producer slows down or drops when a consumer cannot keep up. For a WebSocket, a slow client's send buffer grows; without a cap the server runs out of memory. Bound the buffer, coalesce updates, drop intermediate states, or disconnect the client with a resync."
+    },
+    {
+      "q": "How do you handle the celebrity fan-out problem in real time?",
+      "a": "A message to a million subscribers is not delivered by one node looping over a million sockets. Use hierarchical fan-out (publish once to a topic, each gateway delivers to its local subscribers), batch deliveries, and for the largest audiences let clients pull from a cache instead of pushing to each."
+    }
+  ],
   "children": [
     {
       "name": "Transport",
@@ -104,7 +133,9 @@
         "hyper"
       ],
       "short": "Long-poll → SSE → WebSocket → WebTransport/QUIC — each transport has different tradeoffs in compatibility, latency, and complexity",
+      "tldr": "Long-polling works everywhere and costs the most. SSE is plain HTTP, one-way, auto-reconnecting, and perfect for notifications and feeds. WebSocket is the standard for two-way, with the price of stateful connections and proxy quirks. WebTransport and QUIC are the frontier for lossy mobile networks.",
       "keyInsight": "The transport choice is a tradeoff between universality and performance. Long-polling works literally everywhere (even behind the most restrictive corporate proxies) but is expensive and slow. SSE works everywhere HTTP works and is perfect for one-way server push. WebSocket is the standard for two-way communication but requires sticky sessions and special proxy/CDN configuration. WebTransport is the future (no head-of-line blocking, multiplexed streams) but has limited browser support. Most production systems use a layered approach: WebSocket as primary, SSE or long-polling as automatic fallback.",
+      "mentalModel": "Ways to get updates from a friend. Polling is calling every minute to ask 'anything new?'. Long-polling is calling and staying on the line until they have something to say. SSE is them having your number and texting you whenever something happens. WebSocket is an open phone line where both of you can talk whenever. The open line is best for conversation and worst if the switchboard disconnects idle calls.",
       "detail": {
         "what": "The wire-level mechanism for maintaining a low-latency communication channel between client and server. Each transport has fundamentally different characteristics: (1) Long-polling: client sends an HTTP request, server holds it open until data is available (or timeout, typically 30s). Client immediately sends a new request. Each 'push' requires a full HTTP request-response cycle (headers, TLS overhead). Works through ALL proxies, firewalls, and CDNs — the universal fallback. Cost: ~2KB overhead per 'poll' cycle from HTTP headers alone. (2) Server-Sent Events (SSE): HTTP response with Content-Type: text/event-stream. Server writes events to the response stream; connection stays open. One-way only (server → client). Browser EventSource API has built-in auto-reconnect with last-event-ID (the browser automatically tells the server the last event it received, enabling seamless resume). Works with HTTP/2 multiplexing (many SSE streams over one TCP connection). Can't send data from client to server on the same connection. (3) WebSocket: starts as an HTTP Upgrade request, then switches to a persistent TCP connection with a thin framing protocol. Full-duplex (both directions simultaneously). Sub-frame overhead: 2–6 bytes per message (vs ~200–800 bytes for HTTP headers). Requires load balancer support for connection upgrade and sticky sessions. (4) WebTransport: built on HTTP/3 (QUIC over UDP). Supports multiplexed bidirectional streams without head-of-line blocking. If one stream's packet is lost, other streams continue unaffected (unlike TCP where one lost packet blocks everything). Also supports unreliable datagrams (useful for gaming, voice — low latency, accept packet loss). Newer: Chrome 97+ (2022), limited proxy/CDN support.",
         "why": "The transport choice directly affects user experience, infrastructure cost, and operational complexity. SSE is underappreciated: for the very common pattern of 'server pushes updates to client' (notifications, feed updates, dashboard refreshes, deployment logs), SSE is simpler than WebSocket (no upgrade handshake, works through CDNs and proxies, auto-reconnect built into the browser API) and sufficient. WebSocket is necessary only when the client needs to send data back on the same connection (chat messages, collaborative editing commands, gaming input). Many applications that use WebSocket would be better served by SSE + regular HTTP POST for client-to-server messages — simpler infrastructure, better proxy compatibility, and the same user experience.",
@@ -195,6 +226,44 @@
           "desc": "Server sends messages to a client on a slow network (mobile 3G). The per-connection outbound buffer grows as messages accumulate faster than they're sent. Without a limit, a handful of slow clients can cause the server to OOM, killing connections for everyone. Solution: per-connection outbound buffer limit (typically 256KB–1MB). When exceeded, close the connection with a 'buffer overflow' close code. The client reconnects and catches up via message history. ws (Node.js): `ws.bufferedAmount` check before sending. Go: use a buffered channel as write queue with select/timeout."
         }
       ],
+      "examples": [
+        {
+          "name": "Slack's long-poll fallback and WebSocket primary",
+          "desc": "Slack uses WebSockets for its real-time messaging but ships a fallback for networks where WebSockets are blocked or unstable, because enterprise customers sit behind proxies that terminate idle connections. Supporting the fallback cost engineering time and saved countless support tickets from corporate users."
+        },
+        {
+          "name": "ChatGPT's streaming via SSE",
+          "desc": "Token-by-token streaming of LLM responses is delivered over Server-Sent Events: one-way, plain HTTP, cacheable and proxy-friendly, with automatic reconnection. It is the canonical case where SSE beats WebSocket: the client sends one request and only receives after that."
+        }
+      ],
+      "interview": {
+        "prompt": "'WebSockets or SSE or polling?' The interviewer will push on corporate networks, mobile, and what happens at a load balancer.",
+        "senior": "Picks WebSocket for chat, SSE for notifications, and explains that polling is simplest but wasteful; mentions sticky sessions for WebSockets.",
+        "staff": "Chooses by direction, environment, and operational cost: SSE whenever the client only receives, because it rides HTTP, passes every proxy, and needs no special balancer. WebSocket when the client sends frequently, with a long-poll fallback for restrictive networks and an explicit plan for idle timeouts (heartbeats shorter than the shortest proxy timeout). Designs the connection tier for deploys: connection draining, reconnect with jitter and a resume cursor so no message is lost. Explains why sticky sessions are a smell and prefers a connection registry plus backplane so any node can serve any client. Considers QUIC and WebTransport for mobile where head-of-line blocking and network changes hurt TCP.",
+        "probes": [
+          "A corporate proxy kills idle connections after 60 seconds. How does your WebSocket survive?",
+          "Why does the LLM streaming use SSE instead of WebSocket?",
+          "What state does a WebSocket gateway hold, and how do you lose a node without losing messages?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "When is SSE strictly better than WebSocket?",
+          "a": "When data flows one way from server to client: notifications, feeds, progress, streamed LLM output. SSE is plain HTTP with built-in reconnection and last-event-id resume, works through every proxy and CDN, and needs no special load balancer support."
+        },
+        {
+          "q": "What is head-of-line blocking and how does QUIC address it?",
+          "a": "On TCP, one lost packet stalls every stream multiplexed on that connection until it is retransmitted. QUIC runs over UDP with independent streams, so a lost packet delays only its own stream, which matters on lossy mobile networks. It also survives IP changes (switching from Wi-Fi to cellular) without reconnecting."
+        },
+        {
+          "q": "Why do long-lived connections need heartbeats?",
+          "a": "Proxies, load balancers, and NATs drop idle connections silently, often after 30 to 60 seconds. Neither side learns until a send fails. Periodic pings shorter than the smallest timeout keep the path alive and detect dead peers quickly."
+        },
+        {
+          "q": "What does a resume cursor give you on reconnect?",
+          "a": "The client sends the id of the last message it received; the server replays anything newer from a buffer or log. Without it, a reconnect is a gap in the stream, and the only recovery is a full refetch of state."
+        }
+      ],
       "related": [
         {
           "id": "compute-lb",
@@ -219,7 +288,9 @@
         "hyper"
       ],
       "short": "Redis pub/sub → NATS → custom routing fabric — the nervous system connecting your gateway nodes",
+      "tldr": "When connections are spread across many gateway nodes, a backplane routes each message to the nodes that have interested subscribers. Redis pub/sub broadcasts to everyone and is fine at small scale. NATS and topic-aware routing cut fan-out at medium scale. A custom routing fabric with subscription registries is the endgame.",
       "keyInsight": "When you have multiple WebSocket gateway nodes (because one can't handle all connections), the pub/sub backplane solves the routing problem: user A is connected to Gateway 1, user B is connected to Gateway 2, and user A sends user B a message. The backplane ensures the message reaches Gateway 2. Without it, each gateway is an island — messages only reach users on the same node. The choice of backplane technology determines your message delivery guarantees (at-most-once vs at-least-once), throughput ceiling, and latency floor.",
+      "mentalModel": "A hotel switchboard. A caller asks for a guest by name. A tiny hotel yells down the hall (broadcast). A large hotel keeps a register of which room each guest is in and rings only that room (subscription registry). A chain of hotels needs to know which building the guest is in before ringing the room (hierarchical routing).",
       "detail": {
         "what": "The internal message routing fabric that connects multiple real-time gateway nodes, ensuring messages published by any producer reach all interested subscribers regardless of which gateway they're connected to. Three patterns: (1) Broadcast (Redis Pub/Sub, NATS core): every message goes to every gateway. Each gateway filters locally for relevant subscriptions. Simple, but wasteful at scale (gateways process messages for users they don't have). (2) Topic-routed (NATS with subject hierarchy, Kafka topics): messages are published to specific topics (e.g., `room.42.messages`), and gateways subscribe only to topics for their connected users. More efficient — gateways only receive relevant messages. (3) Direct-routed (custom): the publisher knows which gateway(s) have the target user (via a presence/routing table) and sends directly to those gateways. Most efficient — zero wasted delivery — but requires maintaining an accurate routing table.",
         "why": "Without a backplane, each gateway is a silo. If you have 10 gateway nodes and a user sends a chat message, only users connected to the same gateway see it — 90% of the room misses the message. The backplane bridges this gap. The choice of backplane technology has massive implications: Redis Pub/Sub is simplest but at-most-once (if a gateway is temporarily disconnected, it misses messages — no replay). NATS is faster and supports both at-most-once (core NATS) and at-least-once (JetStream). Kafka is durable and replayable but adds 10–50ms latency and significant operational complexity — usually overkill for real-time push. For most real-time applications, at-most-once is acceptable because (1) the user refreshes or reconnects and catches up, and (2) critical messages (order confirmations, payment notifications) should go through a reliable async channel (SQS, Kafka) anyway, not just the real-time push.",
@@ -274,6 +345,52 @@
           "desc": "Flannel is Slack's edge caching layer that maintains a copy of workspace metadata (channels, members, read states, presence) at every edge PoP. When a user opens Slack, the initial load comes from the nearest flannel cache — sub-50ms worldwide. Presence updates ('user is typing,' 'user is online') propagate through the flannel network. This avoids the need for every presence check to round-trip to a central server — at Slack's scale (millions of simultaneous users), that would require a server cluster dedicated just to presence."
         }
       ],
+      "pitfalls": [
+        {
+          "name": "Broadcast backplane at scale",
+          "desc": "Redis pub/sub sends every published message to every gateway node subscribed to the channel pattern, and many deployments subscribe every node to everything. Traffic on the backplane becomes nodes times messages, and each gateway spends CPU filtering messages for connections it does not have. Past a few dozen nodes, you need per-topic subscriptions or a routing layer that knows which node holds which subscriber."
+        },
+        {
+          "name": "No durability, no catch-up",
+          "desc": "A pure pub/sub backplane delivers to whoever is listening right now. A client mid-reconnect, a gateway mid-restart, or a slow consumer simply misses messages with no record. Pair the backplane with a short-retention log (Redis Streams, Kafka, NATS JetStream) keyed by topic so clients can resume from a cursor."
+        },
+        {
+          "name": "Single backplane as a global failure domain",
+          "desc": "One Redis instance carrying all real-time traffic is a single point of failure for every connected user at once. Shard the backplane by topic hash, run it clustered, and ensure gateways degrade (queue locally, retry) rather than drop connections when the backplane blips."
+        },
+        {
+          "name": "Hot topics",
+          "desc": "A single channel with a million subscribers (a live event) puts all its fan-out on whichever backplane shard owns that topic. Detect hot topics and split them (sub-channels, hierarchical fan-out) or serve the hottest via cached pull instead of push."
+        }
+      ],
+      "interview": {
+        "prompt": "'User A is on gateway 1, user B on gateway 2. How does A's message reach B?' is the backplane question, and the follow-up is 'now with 500 gateways'.",
+        "senior": "Publishes the message to Redis pub/sub on a channel for the conversation; every gateway subscribed to that channel delivers it to local connections.",
+        "staff": "Starts with the simple broadcast design and names its limit (backplane traffic scales with node count). Moves to topic-aware routing: a subscription registry that maps topic to the set of gateways with subscribers, so publishes go only where needed, with the registry kept consistent as clients connect and disconnect. Adds a durable log per topic for catch-up and ordering, and separates the hot path (push) from the recovery path (pull by cursor). Shards the backplane and designs gateway behavior during backplane failure. Handles hot topics with hierarchical fan-out. Measures end-to-end delivery latency and backplane fan-out ratio as the key metrics.",
+        "probes": [
+          "With 500 gateways and Redis pub/sub, how much backplane traffic does one message create?",
+          "A gateway restarts. How do its clients get the messages sent during the 5 seconds they were disconnected?",
+          "Where does ordering come from in your design, and is it per topic or global?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "Why does broadcast pub/sub stop scaling, and what replaces it?",
+          "a": "Every message goes to every node, so backplane bandwidth and per-node filtering grow linearly with node count. Replace with a subscription registry that routes each topic only to the nodes holding subscribers, or a broker with native topic routing like NATS."
+        },
+        {
+          "q": "What does a durable log add to a pub/sub backplane?",
+          "a": "Ordering per topic, retention for a window, and resume-by-cursor so a client or gateway that was disconnected can catch up instead of missing messages. Pub/sub handles the live path; the log handles recovery."
+        },
+        {
+          "q": "How do you handle a hot topic with a million subscribers?",
+          "a": "Hierarchical fan-out: publish once to the topic, each gateway delivers to its local subscribers, and shard the topic across backplane nodes. For the largest audiences, have clients poll a cached snapshot instead of receiving individual pushes."
+        },
+        {
+          "q": "What should a gateway do when the backplane is unreachable?",
+          "a": "Keep client connections open, buffer outbound publishes briefly with a cap, surface a degraded state, and retry with backoff. Dropping every connection turns a backplane blip into a thundering herd reconnect."
+        }
+      ],
       "related": [
         {
           "id": "msg-pattern",
@@ -294,6 +411,7 @@
         "hyper"
       ],
       "short": "Last-write-wins → OT → CRDT — the algorithms that make 'multiplayer' software possible",
+      "tldr": "Concurrent edits to shared state must merge without coordination. Last-write-wins loses data. Operational transformation (OT) transforms operations against each other through a central server. CRDTs make merges commutative so any order converges, enabling offline and peer-to-peer. Pick by data type and whether a server is always in the loop.",
       "keyInsight": "When two users edit the same document simultaneously, their edits will conflict. User A types 'Hello' at position 5 while User B deletes characters 3–7. If you naively apply both operations, the result is garbage. The merge strategy determines whether collaborative editing feels magical (Google Docs) or frustrating (email attachments back and forth). Two dominant algorithms exist: Operational Transform (OT, used by Google Docs) requires a central server to order and transform operations — simpler for the server author, but the server is a single point of failure and a latency bottleneck. CRDTs (Conflict-free Replicated Data Types, used by Figma) use mathematical properties to merge operations in any order on any node and converge to the same result — no central server needed, works offline, but generates more metadata and is harder to implement.",
       "mentalModel": "Imagine two people editing the same whiteboard from different rooms, connected by video. OT is like having a referee: each person describes their edit ('I drew a circle at position X'), the referee transforms conflicting edits ('Person A's circle at position 5 needs to shift to position 6 because Person B inserted text before it'), and both whiteboards converge. The referee (server) must see every edit and transform it — if the referee goes offline, editing stops. CRDT is like giving each person a special kind of whiteboard where any sequence of operations in any order always produces the same final result — like painting with additive colors where the order doesn't matter because the physics guarantees convergence. No referee needed, but the whiteboard is more complex (it tracks the 'identity' of each brushstroke so it can merge deterministically).",
       "detail": {
@@ -363,6 +481,34 @@
         {
           "name": "Notion blocks — hybrid merge strategy",
           "desc": "Notion uses a hybrid approach: block content (text within a block) uses OT-like conflict resolution with the server as sequencer. Block properties (color, type, toggle state) use CRDT-like last-writer-wins. Comments are append-only (no merge needed — all comments are preserved). Block ordering uses a fractional indexing scheme that allows insertion between blocks without reindexing. This hybrid approach lets Notion optimize each data type for its specific access pattern rather than forcing everything through a single merge algorithm."
+        }
+      ],
+      "interview": {
+        "prompt": "'Design Google Docs' or 'design Figma' is really 'how do two edits to the same character merge?'",
+        "senior": "Explains OT with a central server transforming operations, mentions CRDTs as the decentralized alternative, and uses WebSockets for delivery.",
+        "staff": "Models the document as the right data structure first (sequence for text, map for properties, tree for a page) and then chooses the merge strategy per type: CRDT sequences for text when offline support matters, simpler last-writer-wins registers for properties where that is acceptable, OT where a central server is always present and operation semantics are rich. Designs the sync protocol: operation log with vector clocks or Lamport timestamps, snapshots to bound history, compaction to control CRDT metadata growth, and awareness channels (cursors, presence) on a separate lossy path. Addresses the server's role in persistence, access control, and conflict surfacing. Knows the real-world tradeoffs Figma made (custom CRDT in Rust, server as arbiter for some properties) and why Notion uses a hybrid.",
+        "probes": [
+          "Two users bold the same word while a third deletes it. What is the result under your algorithm?",
+          "How does CRDT metadata grow, and how do you keep a document from doubling in size?",
+          "Why does Figma not use OT, and why does Google Docs not use CRDTs?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "What is the core difference between OT and CRDTs?",
+          "a": "OT keeps operations simple and transforms them against concurrent operations, which requires a central server to define a canonical order. CRDTs encode enough metadata in the data structure that any order of merging converges, so no server ordering is required and offline or peer-to-peer editing works."
+        },
+        {
+          "q": "Why does last-write-wins lose data, and when is it acceptable?",
+          "a": "Two concurrent edits to the same value: one overwrites the other silently. It is acceptable for properties where the latest intent should win (a color, a position) and unacceptable for sequences like text where both insertions should survive."
+        },
+        {
+          "q": "What is CRDT bloat and how is it managed?",
+          "a": "Sequence CRDTs keep tombstones and unique ids for every character ever inserted, so a document's size grows with its edit history even after deletions. Manage with periodic compaction once all peers have seen the deletions, snapshots plus a bounded operation log, and efficient encodings."
+        },
+        {
+          "q": "Why is awareness data (cursors, presence) handled separately from document data?",
+          "a": "It is high-frequency, ephemeral, and loses nothing if dropped. Sending it through the durable operation log would bloat history and add latency. Use a lossy side channel with the latest-value semantics and no persistence."
         }
       ],
       "related": [

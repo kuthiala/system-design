@@ -11,6 +11,9 @@
     "hyper"
   ],
   "short": "Local disk → object storage → CDN → multi-region edge — because binary data has no business living in your database",
+  "tldr": "Binary data (uploads, exports, media, backups) belongs in object storage, never in the database. The ladder is local disk, object storage with presigned URLs, a CDN in front, and multi-region edge. Lifecycle policies and access controls are not optional, and uploads must never proxy through your application servers.",
+  "keyInsight": "Object storage is effectively infinite and cheap, which makes the real costs invisible until they are enormous: egress bandwidth, lifecycle neglect, and public bucket leaks. Design the access path and the deletion path before the first upload.",
+  "mentalModel": "A warehouse with a loading dock, not a filing cabinet in the office. Trucks (clients) drive straight to the dock with a signed delivery slip (presigned URL) instead of carrying boxes through the reception desk (your API servers). A storefront near the customer (CDN) stocks popular items so nobody drives to the warehouse for them.",
   "detail": {
     "what": "File & blob storage is the infrastructure for unstructured binary data: user uploads (profile photos, documents, videos), system-generated files (PDF reports, CSV exports, resized image variants), backups, and logs. Unlike structured data (rows in a database), binary blobs are opaque byte sequences that are written once, read many times, and rarely updated in place. Object storage (AWS S3, Google Cloud Storage, Cloudflare R2) is the canonical answer for this workload — it provides a flat key-value namespace (think of it as a giant hash map: key = 'users/42/avatar.jpg', value = the bytes of that image), virtually infinite capacity (S3 stores exabytes of data across all customers), HTTP-native access (every object gets a URL), and durability to 11 nines (99.999999999% — S3 is designed to lose less than 1 object per 10 billion objects stored per year, achieved by automatically replicating each object across at least 3 physically separated facilities). Object storage is not a file system — there are no directories, no file locks, no append operations. It's optimized for 'write whole object, read whole object, delete whole object.' If you need to update a file, you upload a new version. This simplicity is what makes it virtually infinitely scalable. Adding a CDN (Content Delivery Network) in front transforms your storage from 'files in one datacenter' to 'files cached at 300+ locations worldwide.' The CDN keeps copies of popular files at edge PoPs (Points of Presence) near users, so the 95% of requests for popular content are served in <10ms from the nearest PoP, while only the 5% long-tail requests actually reach your origin storage. Think of the CDN as a global cache layer specifically for static files.",
     "why": "Binary data in your database is one of the most expensive mistakes in system design, and it's disturbingly common in early-stage applications because it's the easiest path ('just add a BYTEA column!'). Here's what actually happens: a 5MB image stored as a PostgreSQL BLOB bloats your table by 5MB per row. With 100K users, that's 500GB of images mixed in with your transactional data. Your nightly backup that used to take 5 minutes now takes 2 hours — and it's backing up the same images every night even though they never change. Your database cache (shared_buffers in Postgres) is now full of image bytes instead of hot query data, so your actual transactional queries are slower. Your replication lag increases because every image upload ships 5MB across the wire to each replica. Your pg_dump takes forever, your PITR (point-in-time recovery) archives balloon, and your cloud storage bill is $0.10–0.20/GB/month instead of S3's $0.023/GB/month — a 5–10× cost premium for worse performance. Object storage solves all of these problems: it's purpose-built for binary data, costs 5–10× less, scales infinitely without affecting your transactional database, and integrates natively with CDNs for global delivery. The pattern is simple and universal: store the file in S3, store the URL/key in your database, serve via CDN. Every major platform — Instagram, Twitter, Dropbox, Slack, Figma — uses this pattern. The only question is how sophisticated your CDN and transformation pipeline needs to be.",
@@ -227,5 +230,33 @@
       ]
     }
   },
+  "interview": {
+    "prompt": "'Users upload photos and videos.' The interviewer wants to see the upload path, the serve path, and what happens to the bytes over their lifetime.",
+    "senior": "Stores files in S3 with metadata in the database, serves through a CDN, and generates presigned URLs for uploads.",
+    "staff": "Designs the upload path to bypass servers entirely: presigned or direct-to-storage uploads with size and type constraints, multipart for large files, a completion callback or event that writes metadata and triggers processing (virus scan, transcoding, thumbnails) asynchronously. Designs the serve path with a CDN, signed URLs for private content, cache keys that include a content hash so invalidation is unnecessary, and image variants generated on demand or at upload. Plans the data lifecycle: tiering to cold storage by age and access, deletion that actually deletes (including derived variants and backups), and cost modeling where egress, not storage, dominates. Covers durability versus availability, cross-region replication for DR, and the security basics: private buckets by default, least-privilege IAM, and bucket policy audits.",
+    "probes": [
+      "A 2GB upload fails at 90 percent. What happens, and how does the user resume?",
+      "Egress is now 60 percent of the storage bill. What do you change?",
+      "A user deletes their account. Where are all the copies of their photo?"
+    ]
+  },
+  "quiz": [
+    {
+      "q": "Why should uploads never proxy through your application servers?",
+      "a": "Each upload ties up a server connection and memory for the duration, so a few hundred slow mobile uploads can exhaust the fleet. Presigned URLs let clients upload straight to object storage; the server only issues the URL and records metadata on completion."
+    },
+    {
+      "q": "What is the difference between durability and availability in object storage?",
+      "a": "Durability is the probability the bytes are not lost (S3 promises 11 nines, roughly one object lost in 10 million per 10,000 years). Availability is the probability a request succeeds right now (99.9 percent or so). Your data can be perfectly safe and still unreachable for an hour."
+    },
+    {
+      "q": "How do you avoid CDN cache invalidation problems entirely?",
+      "a": "Put a content hash or version in the object key or URL so every change is a new URL. Old URLs stay valid and cached, new content is fetched fresh, and you never issue a purge. Reserve purges for emergencies like leaked content."
+    },
+    {
+      "q": "What is a lifecycle policy and what happens without one?",
+      "a": "Rules that transition objects to cheaper storage classes after N days and delete them after M. Without one, every temporary export, log, and abandoned multipart upload lives forever at the hot-tier price, and the bill grows monotonically with company age."
+    }
+  ],
   "children": []
 }

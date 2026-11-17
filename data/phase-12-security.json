@@ -11,6 +11,9 @@
     "hyper"
   ],
   "short": "Authentication, authorization, and data protection — the three concerns that are cheap to build in on day one and catastrophically expensive to retrofit later",
+  "tldr": "Three concerns that are cheap on day one and ruinous to retrofit: authentication (who you are), authorization (what you may do), and data protection (encryption, secrets, PII minimization). Use standard protocols and managed identity, assume the network is hostile, and never log what you would not want leaked.",
+  "keyInsight": "Security is not a layer you add; it is the set of assumptions you refuse to make. Do not assume the network is private, the client is honest, the dependency is safe, the log is harmless, or the secret in the environment variable will stay there. Every retrofit is expensive precisely because an assumption got baked into a thousand places.",
+  "mentalModel": "An airport. Identity is checked once at a controlled entry (authentication at the gateway), but your boarding pass is checked again at every gate (authorization at each service), and no one trusts that being inside the terminal means you belong on this plane (zero trust). Baggage is screened (input validation), the manifest never lists passport numbers (PII minimization), and the master key for the building is not taped under the counter (secrets management).",
   "detail": {
     "what": "Security in system design covers three deeply intertwined concerns that together determine whether your users' data stays safe and your system stays trustworthy: (1) Authentication (AuthN) — proving who you are. This is the 'login' layer: passwords verified against bcrypt hashes, OAuth2 flows with Google/GitHub, magic links sent to email, hardware security keys (FIDO2/WebAuthn), and the tokens (JWT, session cookies) that prove 'this request comes from user 42 who authenticated 3 minutes ago.' The output of authentication is a verified identity. (2) Authorization (AuthZ) — deciding what you're allowed to do. Once we know you're user 42, can you read document X? Can you delete user 43? Can you access the admin panel? Authorization models range from simple RBAC (Role-Based Access Control: 'user 42 has the admin role, admins can delete users') to ABAC (Attribute-Based Access Control: 'user 42 can edit documents they created, in their own organization, during business hours') to policy engines like OPA (Open Policy Agent) that evaluate complex rules at runtime. (3) Data protection — ensuring that data is encrypted in transit (TLS), encrypted at rest (disk-level or field-level encryption), that encryption keys are managed securely (never in source code, always in a secrets manager like Vault or AWS KMS), and that sensitive data (PII, credentials) never leaks through logs, error messages, analytics, or backups. Beyond these three pillars, operational security includes: secure development lifecycle (dependency scanning, SAST/DAST, code review for auth logic), vulnerability management (patching known CVEs within 24–72 hours), and incident response (how you detect, contain, and communicate a breach). Security is not a feature you add — it's a property of every decision you make, from 'how do I store this password' to 'who can access the production database' to 'what happens when an employee laptop is stolen.'",
     "why": "Security failures are existential, not just expensive. The average cost of a data breach is $4.45M (IBM Cost of a Data Breach Report 2023), but that average masks the bimodal distribution: most breaches cost $100K–$500K in direct costs (incident response, notification, legal), while mega-breaches (Equifax: $1.4B settlement, Marriott: $124M fine, Yahoo: reduced acquisition price by $350M) can threaten the company's existence. Beyond direct costs, breaches destroy trust: 65% of consumers lose trust in a company after a breach (Ponemon), and in competitive markets, trust is the only moat. The cheapest time to add security is the first day of development. Adding authentication after launch means retrofitting every endpoint. Adding encryption at rest after you've stored 5TB of unencrypted PII means a months-long migration with data-loss risk. Adding audit logging after a compliance audit fails means reconstructing months of history from application logs that weren't designed for it. The good news: 90% of breaches come from the same handful of mistakes — weak or missing authentication (credential stuffing, broken auth), unpatched known vulnerabilities (the Equifax breach was a known Apache Struts CVE that was unpatched for 2 months), leaked secrets (AWS keys on GitHub), and misconfigured cloud storage (public S3 buckets). Cover these well and you're ahead of most companies regardless of size. Security is one of the few areas where 'doing the basics well' provides 90% of the protection at 10% of the cost of doing everything.",
@@ -159,5 +162,33 @@
       ]
     }
   },
+  "interview": {
+    "prompt": "Security is usually a follow-up: 'How do you authenticate?' 'How do services trust each other?' 'What if the database leaks?' A staff candidate has a two-sentence answer ready for each.",
+    "senior": "Uses OAuth2 or OIDC with JWTs, validates tokens at the gateway, enforces HTTPS, hashes passwords with bcrypt, and encrypts data at rest.",
+    "staff": "Separates authN (done once, at the edge, with a managed identity provider) from authZ (done in every service, close to the data, with a policy model: RBAC, ABAC, or relationship-based like Zanzibar for sharing). Designs token lifecycle: short-lived access tokens, rotating refresh tokens, revocation path, and what happens when a signing key must rotate. Applies zero trust internally: mTLS via mesh, workload identity instead of static secrets, secrets in a vault with rotation, least-privilege IAM. Minimizes what can leak: field-level encryption or tokenization for the few truly sensitive fields, PII scrubbed from logs, data classified so retention and access rules follow it. Treats dependencies as attack surface (SBOM, patch SLAs, Log4Shell as the cautionary tale). Plans for breach: audit logs, anomaly detection, and a tested incident response.",
+    "probes": [
+      "A JWT is stolen. How long is it useful, and how do you cut that window?",
+      "Service A calls service B. How does B know it is A, and that A is allowed to ask?",
+      "What is in your logs that would make a breach worse?"
+    ]
+  },
+  "quiz": [
+    {
+      "q": "Contrast authentication and authorization, and where each should happen.",
+      "a": "Authentication proves identity and happens once at the edge (gateway or identity provider). Authorization decides what that identity may do and happens in every service, next to the data, on every request, because only the service knows the resource and the policy."
+    },
+    {
+      "q": "Why are short-lived access tokens with refresh tokens the standard?",
+      "a": "A stolen access token is only useful until it expires (minutes), bounding damage. Refresh tokens are longer-lived but stored more securely, rotated on use, and revocable server-side, so a compromised session can be cut off without making every request hit a session database."
+    },
+    {
+      "q": "What does zero trust mean for service-to-service traffic?",
+      "a": "Being inside the VPC grants nothing. Every call carries a verifiable workload identity (mTLS certificates from a mesh or SPIFFE), is encrypted in transit, and is authorized per service. A compromised pod can talk only to what its identity is allowed to reach."
+    },
+    {
+      "q": "What was the lesson of Equifax and of Log4Shell?",
+      "a": "Equifax lost 147 million records through a known, patched vulnerability left unpatched for months: patch SLAs are security controls. Log4Shell showed that a transitive dependency can be a remote code execution hole in every service at once: you need an inventory of what you run (SBOM) and the ability to patch everything in hours."
+    }
+  ],
   "children": []
 }

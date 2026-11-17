@@ -11,6 +11,9 @@
     "hyper"
   ],
   "short": "GDPR · SOC2 · HIPAA · data residency · right-to-erasure — compliance is an architecture decision, not a checkbox",
+  "tldr": "Compliance (GDPR, SOC 2, HIPAA, PCI, residency) is architecture, not paperwork. Know where PII lives, minimize it, be able to delete it everywhere on request, log who accessed it, and keep data in the jurisdictions it belongs. Retrofitting these onto a system that scattered PII across twenty services is a year-long project.",
+  "keyInsight": "Every compliance requirement reduces to one architectural capability: knowing exactly where a given person's data is. If you can answer that in one query, erasure, access requests, residency, and breach scoping are all tractable. If you cannot, no amount of policy will save you.",
+  "mentalModel": "Handling hazardous material in a factory. You label it the moment it enters (classification), store it in a few marked containers instead of leaving it on every workbench (centralized PII), log everyone who opens a container (audit), keep it in the country whose rules it falls under (residency), and have a procedure to dispose of all of it when a customer asks (erasure). A factory where chemicals are in unlabeled jars everywhere is not fixed by writing a policy.",
   "detail": {
     "what": "Compliance and governance is the discipline of designing systems that satisfy data protection regulations (GDPR, CCPA, HIPAA, PCI-DSS, LGPD, PIPL) and security/operational standards (SOC2, ISO 27001, FedRAMP) — not as an afterthought bolted on before an audit, but as foundational architectural patterns woven into how data flows, where it lives, who can access it, and how it gets deleted. It spans five interlocking concerns: (1) Data classification — knowing what data you have, where it lives, and how sensitive it is (PII, PHI, PCI cardholder data, non-sensitive). (2) Data residency — ensuring data stays in the jurisdiction where law requires it (EU personal data in the EU, Chinese citizen data in China). (3) Access control and audit — proving who accessed what data, when, and why, with immutable logs that can't be tampered with. (4) Data subject rights — the ability to fulfill deletion requests (GDPR right-to-erasure), portability requests (export all my data), and correction requests within legally mandated timelines. (5) Continuous compliance — not just passing an annual audit, but maintaining compliance posture continuously with automated checks, policy-as-code, and drift detection. The critical insight: compliance is architectural. If you scatter PII across 50 microservices, 10 data warehouses, 5 backup systems, and 3 analytics pipelines, fulfilling a single GDPR deletion request requires coordinating deletions across all of them — a project that takes weeks per request if not designed in, and is sometimes literally impossible when PII has leaked into log files, ML training sets, or abandoned dev environments.",
     "why": "Compliance failures are existential in ways that even major outages are not. A 4-hour outage is painful but recoverable; a GDPR violation carries fines of up to 4% of global annual revenue or €20 million (whichever is higher), plus the reputational damage that causes enterprise customers to flee. Amazon's Luxembourg GDPR fine was €746 million. Meta's Irish fine was €1.2 billion. These are not theoretical. HIPAA violations in healthcare can reach $1.5 million per violation category per year. PCI-DSS non-compliance for payment handling leads to higher transaction fees, mandatory forensic audits costing $100K+, and potential loss of the ability to process cards entirely. SOC2 is increasingly table-stakes for B2B SaaS — enterprise procurement teams won't even evaluate your product without a SOC2 Type 2 report. Beyond the stick, there's a carrot: compliance done well is a competitive moat. Stripe's PCI compliance infrastructure lets merchants accept payments without ever touching card data — that's a product feature built on compliance architecture. The companies that treat compliance as architecture rather than paperwork move faster, not slower, because they've built the guardrails that let them ship confidently in regulated environments.",
@@ -188,6 +191,34 @@
       ]
     }
   },
+  "interview": {
+    "prompt": "'We have users in the EU.' At staff level, the interviewer expects those words to reshape the data model, not just add a cookie banner.",
+    "senior": "Mentions GDPR, encrypts PII at rest, keeps EU data in an EU region, and adds an endpoint to delete user data.",
+    "staff": "Classifies data at the schema level (PII, sensitive PII, non-PII) and designs so PII lives in as few places as possible, ideally a vault or tokenized store with other systems holding tokens. Designs erasure as a workflow that reaches every store, including search indexes, caches, warehouses, logs, and backups (with crypto-shredding for backups), and proves completion. Assigns each tenant or user a home region and makes the routing and storage layers enforce residency. Builds audit logging as an append-only, tamper-evident stream. Minimizes scope: tokenize card data so PCI applies to one service, keep health data in a bounded enclave. Treats compliance as continuous (automated evidence, controls in CI) rather than an annual audit, and keeps third-party integrations in scope.",
+    "probes": [
+      "A user requests erasure. List every system that holds their data and how each deletes it.",
+      "Backups are kept 30 days. How do you honor erasure without breaking backups?",
+      "What would make your PCI scope one service instead of your whole platform?"
+    ]
+  },
+  "quiz": [
+    {
+      "q": "Why is scattered PII the root compliance problem?",
+      "a": "Every obligation (erasure, access requests, residency, breach notification) requires knowing where a person's data is. If PII is copied into logs, caches, warehouses, and twenty services, each request becomes an archaeology project and each new copy is a liability. Centralize or tokenize so most systems never hold raw PII."
+    },
+    {
+      "q": "What is crypto-shredding and what problem does it solve?",
+      "a": "Encrypt each user's data with a per-user key; to erase the user, delete the key. Backups and archives that cannot be edited become unreadable for that user without rewriting them. It solves the conflict between immutable backups and the right to erasure."
+    },
+    {
+      "q": "How does tokenization shrink PCI scope?",
+      "a": "Card numbers are exchanged for tokens by a single hardened service (or a provider like Stripe). Everything else stores and passes tokens, which are useless if leaked. PCI audit scope collapses from the whole platform to the one service that sees real card data."
+    },
+    {
+      "q": "What does continuous compliance mean in practice?",
+      "a": "Controls are automated and evidence is collected continuously: infrastructure as code enforces encryption and access policies, CI checks for PII in logs, access reviews are generated from identity systems, and audit logs are always on. The annual audit becomes a report, not a project."
+    }
+  ],
   "children": [
     {
       "name": "PII Handling",
@@ -202,6 +233,9 @@
         "hyper"
       ],
       "short": "Inline → tokenized → centralized vault — the architecture of erasure",
+      "tldr": "PII handling is the architecture of erasure. Inline PII in every table is fast to build and impossible to delete. Tokenization replaces sensitive fields with references to a vault. A centralized PII service owns storage, access, audit, and deletion so the rest of the system never touches raw personal data.",
+      "keyInsight": "The cost of handling PII is paid at deletion time, not at storage time. Every copy you make for convenience (a log line, a cached profile, a warehouse column, a backup) is a place you will have to find later under a legal deadline.",
+      "mentalModel": "A coat check. Guests hand over their coat (PII) once and receive a numbered ticket (token). Everyone inside the venue deals only in tickets. When a guest leaves, one coat is removed from one rack, and no ticket anywhere in the building can be turned back into a coat.",
       "detail": {
         "what": "PII (Personally Identifiable Information) handling defines how your system stores, accesses, transmits, and — critically — deletes personal data. PII includes the obvious (name, email, SSN, credit card number) and the less obvious (IP address, device fingerprint, location history, biometric data — all considered PII under GDPR). There are three architectural tiers: (1) Inline PII — personal data stored directly in each service's database alongside non-personal data. Simplest to build, hardest to manage at scale. Deletion requires finding and removing data from every table, cache, log, backup, and downstream system. (2) Tokenized PII — sensitive fields (SSN, card number, email) are replaced with opaque tokens before entering the application layer. The real values live in a dedicated vault with strict access controls. Most services never see real PII. Deletion = delete from vault. (3) Centralized PII vault — all personal data lives in a single, audited, encrypted, access-controlled service. Every other system holds only tokens or user IDs. This is the gold standard for compliance: one place to audit, one place to delete, one place to encrypt, one place to apply data residency rules. The migration from inline to tokenized to vaulted is a spectrum — you can tokenize the most sensitive fields first (SSN, financial data) while keeping less sensitive PII (display name) inline, and evolve over time.",
         "why": "The fundamental problem is data proliferation. In a typical system, a user's email address might exist in: the users table, the orders table (as billing_email), the email service's send logs, the analytics warehouse (for cohort analysis), Redis (as a session cache key), CloudWatch logs (from a debug statement), a Jupyter notebook someone ran for an analysis, a dev environment snapshot, and 30 days of database backups. That's 9+ copies of one email address. When that user requests deletion under GDPR, you have 30 days to find and delete every copy. With inline PII, this is a multi-week cross-team coordination effort that's error-prone and often incomplete. With a centralized vault, deletion is one API call — the token becomes meaningless everywhere else simultaneously. The vault approach also solves access control (only the vault service can decrypt PII, not every engineer with DB access), audit logging (every PII access goes through one service and is logged), and data residency (the vault stores data in the user's jurisdiction; all other services are PII-free and jurisdiction-agnostic). The upfront investment in vault architecture pays exponential dividends as your system grows.",
@@ -308,6 +342,34 @@
           "desc": "Apple collects telemetry from billions of devices while guaranteeing no individual user can be identified. They add calibrated noise to data before it leaves the device using local differential privacy (ε-differential privacy with tight epsilon values). This means Apple literally cannot associate telemetry with individuals, even if compelled — the noise makes it mathematically impossible. It's privacy-by-design at the most fundamental level."
         }
       ],
+      "interview": {
+        "prompt": "'How do you store user data?' At staff level the interviewer is listening for whether you can delete it.",
+        "senior": "Encrypts PII fields at rest, restricts access with IAM, and writes a deletion job that removes the user's rows.",
+        "staff": "Classifies fields by sensitivity and chooses handling per class: non-PII inline, PII tokenized with the vault as the only store, highly sensitive data (government ids, health, payment) field-encrypted with per-user keys so crypto-shredding is possible. Routes all PII access through one service with audit logging and purpose-binding. Designs erasure as a tracked workflow: vault deletion, token invalidation, propagation to derived stores (search, cache, warehouse), and crypto-shredding for backups, with a completion report. Scrubs PII from logs at the logging library level. Handles residency by keeping the vault per region. Plans for data subject access requests as the same inventory problem as erasure.",
+        "probes": [
+          "A support engineer needs to see a user's email to help them. How does that happen and what is recorded?",
+          "The warehouse has a denormalized users table. How does erasure reach it?",
+          "Why per-user encryption keys rather than one key for the table?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "Compare inline, tokenized, and vaulted PII handling.",
+          "a": "Inline: PII in every table that needs it, fastest to build, impossible to inventory or delete reliably. Tokenized: sensitive fields replaced with tokens that resolve through a vault, so most systems never hold PII. Vaulted: a dedicated service owns all PII with access control, audit, and deletion, and exposes only what each caller is allowed to see."
+        },
+        {
+          "q": "Why do backups create a deletion paradox and what resolves it?",
+          "a": "Backups are immutable snapshots, so a user deleted today still exists in every backup for the retention period. Resolve with crypto-shredding (per-user keys, delete the key), or by documenting the retention window as the deletion window and ensuring restores re-apply deletions."
+        },
+        {
+          "q": "How do you keep PII out of logs structurally?",
+          "a": "Scrub at the logging library layer with field-name and pattern-based redaction, log identifiers (user id, token) rather than values, and run CI checks that fail on known PII patterns in log statements. Relying on developers to remember is not a control."
+        },
+        {
+          "q": "What is purpose binding for PII access?",
+          "a": "Each access to PII declares why (support case, billing, legal) and is checked against what that purpose permits, then logged. It satisfies regulators' demand that data is used only for stated purposes and gives you an audit trail that explains every read."
+        }
+      ],
       "related": [
         {
           "id": "security",
@@ -332,6 +394,9 @@
         "hyper"
       ],
       "short": "Append-only · tamper-evident · long retention — your compliance paper trail",
+      "tldr": "An audit log is an append-only, tamper-evident record of who did what to which resource, when, from where. It is not the application log. It must survive the compromise of the system it describes, be queryable for years, and be complete for every security-relevant action.",
+      "keyInsight": "An audit log you can edit is not evidence; it is a diary. The design goal is that even an administrator with full database access cannot alter history without detection, which is why audit logs live outside the system they describe, with hash chains or write-once storage.",
+      "mentalModel": "A ship's logbook written in ink, with each page numbered and signed by the officer on watch. Entries are never erased, only appended with corrections. The logbook is kept in a different safe than the cargo manifest, so whoever tampers with the cargo cannot rewrite the record of who had the keys.",
       "detail": {
         "what": "An audit log is an immutable, append-only, tamper-evident record of every security-relevant and compliance-relevant action in your system. It answers the questions that regulators, auditors, and your incident response team will ask: Who accessed this data? When? From where? What did they do? Was it authorized? It's distinct from application logs (which capture debug/operational events) and metrics (which capture numerical health indicators). Audit logs capture access events (user X viewed record Y), mutation events (admin Z changed user X's role from 'member' to 'admin'), authentication events (user X logged in from IP A using MFA), and data handling events (user X's data was exported for a DSR request). These logs must be immutable (no one can modify or delete entries — not even administrators), timestamped with a trusted clock source, retained for the legally required duration (1–7 years depending on regulation), and accessible for investigation but protected against unauthorized access. The gold standard is a hash-chained log where each entry includes a cryptographic hash of the previous entry — any tampering breaks the chain, providing mathematical proof of integrity.",
         "why": "Audit logs are required by every major compliance framework: SOC2 (Principle CC7.2 — log access to sensitive data), HIPAA (§164.312(b) — log all access to PHI with 6-year retention), PCI-DSS (Requirement 10 — track all access to cardholder data), SOX (Section 302/404 — audit trail for financial data), GDPR (Article 30 — records of processing activities). Beyond regulatory requirements, audit logs are your forensic evidence in a breach: they tell you what was accessed, by whom, and help determine the scope of the incident. Without them, a breach investigation is speculation — with them, it's factual analysis. They also deter insider threats: knowing that every action is logged and reviewed discourages unauthorized access. At scale, audit logs become the input to automated anomaly detection: 'Engineer Y accessed 10,000 user records at 3am — is this normal?' ML-based User and Entity Behavior Analytics (UEBA) can flag these patterns automatically.",
@@ -399,6 +464,62 @@
           "to": "hyper",
           "trigger": "Audit log volume exceeds SIEM capacity, or regulatory requirement for real-time anomaly detection (FedRAMP Continuous Monitoring, PCI-DSS Requirement 10.6)",
           "action": "Build an audit log pipeline: events → Kafka → Flink (real-time anomaly scoring) → hot tier (OpenSearch) + cold tier (S3 Glacier) + ledger (QLDB). Deploy ML-based UEBA: baseline user behavior over 30 days, then flag deviations. Start with rule-based anomalies (>100 PII accesses/hour), evolve to ML-based (unsupervised clustering on access patterns). This requires a dedicated security data engineering team (2–3 engineers) and 3–6 months to build."
+        }
+      ],
+      "pitfalls": [
+        {
+          "name": "Audit log in the same database it audits",
+          "desc": "An attacker or a careless admin with write access to the application database can delete the rows that record their actions. Ship audit events out of the system synchronously or via a durable queue to a store with different credentials, append-only permissions, and ideally object lock or write-once retention."
+        },
+        {
+          "name": "Incomplete coverage",
+          "desc": "Logins and deletes are audited; bulk exports, permission changes, and support-tool reads are not. Auditors ask about exactly the paths nobody instrumented. Define the list of security-relevant actions from the regulation (access to PII, privilege changes, configuration changes, data exports) and enforce audit emission in the access layer so a new endpoint cannot skip it."
+        },
+        {
+          "name": "Unqueryable retention",
+          "desc": "Seven years of audit events sit in cold storage as gigantic JSON files. The first incident needing 'every access to record X by anyone in 2023' takes weeks. Index by actor, resource, and time; keep a hot window in a queryable store and a cold tier that can be restored and searched within a defined SLA."
+        },
+        {
+          "name": "Audit events that leak PII",
+          "desc": "The audit log records 'admin viewed user: full name, email, SSN' and becomes the largest PII store in the company. Log identifiers and field names, not values, and apply the same classification and retention rules to the audit log as to the data it describes."
+        }
+      ],
+      "examples": [
+        {
+          "name": "AWS CloudTrail with S3 Object Lock",
+          "desc": "Every API call across an AWS account is recorded to CloudTrail and can be delivered to an S3 bucket with Object Lock in compliance mode, which makes objects undeletable even by the root account for the retention period, plus log file integrity validation via hash digests. It is the reference design for audit logs that survive the compromise of the account they describe."
+        },
+        {
+          "name": "Certificate Transparency logs",
+          "desc": "Public, append-only Merkle-tree logs of every TLS certificate issued, which browsers verify. A certificate not in the log is distrusted, and the log cannot be altered without breaking the tree hashes. It demonstrates tamper evidence through cryptography rather than access control."
+        }
+      ],
+      "interview": {
+        "prompt": "'How would you prove to an auditor who accessed a record?' and 'How do you know an admin did not cover their tracks?'",
+        "senior": "Writes an audit events table with actor, action, resource, and timestamp, restricts write access, and retains it for the required period.",
+        "staff": "Separates audit from application logging and defines the event schema (actor, actor type, action, resource, outcome, source, request id, timestamp) with coverage enforced in the data access and authorization layers. Ships events through a durable pipeline to an append-only store with separate credentials and write-once retention, adds hash chaining or periodic digests for tamper evidence, and monitors the pipeline for gaps. Designs the query layer: a hot indexed window for investigations and alerting, a cold tier with a restore SLA. Feeds the stream to anomaly detection (unusual bulk access, access outside working hours). Keeps PII out of the events and applies retention by regulation. Names the regulations' specific demands (PCI requirement 10, SOC 2 CC7, HIPAA access logs) to show why each property exists.",
+        "probes": [
+          "A database admin deletes their own audit rows. How does your design detect that?",
+          "Which actions in this system must be audited, and where in the code is that enforced?",
+          "An auditor asks for every access to one customer's records over two years. How long does that query take?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "What are the three properties of a trustworthy audit log?",
+          "a": "Append-only (entries cannot be modified or deleted within retention), tamper-evident (any alteration is detectable via hash chains, digests, or write-once storage), and complete (every security-relevant action is recorded, enforced at a layer that cannot be bypassed)."
+        },
+        {
+          "q": "Why must audit logs be stored outside the system they describe?",
+          "a": "If the same credentials that perform actions can edit the record of those actions, an attacker or insider can erase their trail. Separate storage, separate credentials, and write-once retention mean compromising the application does not compromise the evidence."
+        },
+        {
+          "q": "How does hash chaining provide tamper evidence?",
+          "a": "Each entry includes a hash of the previous entry, so altering any entry changes its hash and breaks every subsequent link. Periodically publishing the latest hash to an external location (or a Merkle tree root) lets anyone verify the chain has not been rewritten."
+        },
+        {
+          "q": "What is the difference between an audit log and an application log?",
+          "a": "Application logs are for debugging: verbose, sampled, short retention, editable, may contain anything. Audit logs are for accountability: a fixed schema of who did what, complete, immutable, long retention, PII-minimized, and consumed by security and compliance rather than engineers."
         }
       ],
       "related": [

@@ -11,6 +11,9 @@
     "hyper"
   ],
   "short": "Quantify everything before deciding anything -- numbers are the architecture's foundation",
+  "tldr": "Before you draw a single box, pin seven numbers: traffic, read/write ratio, latency per endpoint class, availability, consistency per feature, geography, and data growth. Every later decision is only right relative to those numbers. A design with no numbers is an opinion.",
+  "keyInsight": "There is no correct architecture, only an architecture that is correct for a specific workload. The requirements phase is where you buy the right to say 'it depends' and then say what it depends on, with a number attached.",
+  "mentalModel": "Think of requirements as GPS coordinates. A map (the rest of this framework) is useless until you know where you are. Each number is one coordinate: traffic tells you the altitude, read/write ratio the heading, latency the speed limit, availability the fuel reserve. Lose one coordinate and every turn becomes a guess.",
   "detail": {
     "what": "The requirements phase is the translation layer between business dreams and engineering reality. When someone says 'build a chat app,' this phase converts that into concrete, measurable constraints: '1M DAU, p99 200ms, 99.95% uptime, $50K/mo budget, EU + US users, 80% mobile, 30:1 read/write ratio, 500GB initial data growing 50GB/month.' It covers seven critical dimensions: (1) traffic patterns -- how much load, when, from where; (2) latency targets -- how fast each endpoint must respond, measured at the 99th percentile, not averages; (3) availability targets -- how much downtime is tolerable, priced in nines; (4) consistency needs -- which operations must see the latest data vs. can tolerate staleness; (5) geographic distribution -- where users are and where data must legally reside; (6) data growth -- how fast storage needs scale and when you'll hit physical limits; and (7) budget -- how much you can spend monthly and what that buys in cloud resources. Think of these numbers as GPS coordinates for your architecture: without them, every downstream decision is a guess. With them, each decision becomes justifiable, debatable, and reversible for the right reasons.",
     "why": "Every architectural choice is only correct relative to your actual workload -- there is no universally 'right' architecture. PostgreSQL is the perfect database at 1,000 RPS and a dangerous choice at 1,000,000 RPS; Cassandra is the opposite. A monolith is ideal for 5 engineers and a bottleneck for 500. Redis is perfect for hot data and a money pit for cold data. Without concrete numbers, you're choosing architectures based on blog posts, conference talks, and what Netflix does -- none of which apply to your specific situation. Guessing wrong is catastrophically expensive in both directions: an over-engineered architecture (microservices for a 3-person team, Cassandra for 100GB of data) wastes money and slows development for years as engineers fight unnecessary complexity. An under-engineered one (single Postgres for 10M concurrent users) collapses on launch day. Requirements also serve as the social contract between engineering and product/business: they make trade-offs visible and negotiable. When you tell a product manager '99.99% uptime costs 5× more than 99.9% -- which do you want?', you're preventing the implicit assumption that everything should be perfect, which leads to either crushing cost or devastating disappointment. The requirements document is the single artifact that prevents the most expensive type of engineering mistake: building the right thing for the wrong scale, or the wrong thing for the right scale.",
@@ -57,6 +60,34 @@
     }
   ],
   "levelUp": [],
+  "interview": {
+    "prompt": "The interviewer says 'Design a ride-sharing app' and goes quiet. The first five minutes decide whether you drive the interview or get driven.",
+    "senior": "Asks good clarifying questions: how many users, which features are in scope, read vs write heavy, global or single region. Writes a short list of functional and non-functional requirements and gets agreement before designing.",
+    "staff": "Does the same, but prioritizes ruthlessly and quantifies. Picks the two or three requirements that actually shape the architecture (for ride-sharing: location write rate, matching latency, and payment consistency) and states which ones do not matter at this scale. Converts vague answers into numbers out loud ('10M DAU, each driver pings every 4s, so roughly 1M writes/sec at peak, which rules out a single Postgres for locations'). Names the number that would change the design if it were 10x different, and asks about it specifically. Sets a time budget for the conversation.",
+    "probes": [
+      "Which of these requirements, if it were 10x larger, would force a different architecture?",
+      "What would you deliberately leave out of scope, and why?",
+      "How would you validate your traffic estimate once the system is live?"
+    ]
+  },
+  "quiz": [
+    {
+      "q": "Name the seven dimensions you should quantify before choosing any architecture.",
+      "a": "Traffic (RPS, DAU, peak-to-average), read/write ratio, latency SLO per endpoint class, availability SLO, consistency needs per feature, geographic distribution and residency, data size and growth rate (plus budget)."
+    },
+    {
+      "q": "What is the '10x test' for a requirement, and why is it useful?",
+      "a": "Ask: 'if this number were 10x higher or lower, would the architecture change?' If nothing changes, the number does not need to be pinned down. If everything changes, you must nail it before designing. It separates the numbers that matter from the ones that are merely interesting."
+    },
+    {
+      "q": "Why is a single global p99 latency target a mistake?",
+      "a": "Different endpoints have different user expectations: search needs <200ms, a PDF export can take 30s, a health check should be <10ms. One global number either over-constrains batch paths or under-constrains interactive ones. Group endpoints into tiers (interactive, fast-background, batch) and set an SLO per tier."
+    },
+    {
+      "q": "Roughly how much of your design time should go into requirements, and what happens if you skip it?",
+      "a": "About 20 to 30 percent. A poorly specified system gets designed twice: once wrong, once right. The second design is the expensive one because it happens after code and data exist."
+    }
+  ],
   "children": [
     {
       "name": "Traffic & Scale",
@@ -71,6 +102,9 @@
         "hyper"
       ],
       "short": "RPS, DAU, MAU, peak-to-avg ratio -- the load your system must bear",
+      "tldr": "Traffic is the weight your system must carry. Measure average and peak RPS, DAU, and the peak-to-average ratio, then size steady-state for average and autoscale for peak. Virality is predictable in shape even when it is not predictable in timing.",
+      "keyInsight": "Average RPS tells you what to pay for. Peak RPS tells you what you will be paged for. The ratio between them decides whether you need autoscaling, pre-warming, or load shedding, and most teams only discover that ratio during their first outage.",
+      "mentalModel": "A bridge is rated for its heaviest truck, not its average car. Your system is the same: you build the deck for the peak and you pay tolls on the average. The peak-to-average ratio is the gap between those two numbers, and it is where both your cost and your risk live.",
       "detail": {
         "what": "Traffic & scale metrics quantify the volume of demand your system faces. The critical numbers are: requests per second (average, p95, p99), daily/monthly active users (DAU/MAU), peak-to-average ratio (how spiky is your traffic?), data volume today, and data growth rate. These aren't just numbers -- they're the primary input to every infrastructure decision. Think of RPS as the 'weight' your system must lift: a system designed for 100 RPS is structurally different from one designed for 100K RPS, just as a bicycle bridge is structurally different from a highway bridge. You can't retrofit one into the other. Additionally, traffic is not uniform -- it has daily patterns (9am spike for B2B, 8pm spike for consumer), weekly patterns (Monday mornings for enterprise tools), seasonal patterns (Black Friday for e-commerce, tax season for financial apps), and viral spikes (a Reddit front page, a celebrity tweet, a TikTok mention). Each pattern demands different scaling strategies.",
         "why": "Traffic is the primary input to nearly every infrastructure decision you'll make: how many database shards you need (1 at 1K RPS, 16 at 100K), how many read replicas (0 at low load, 5+ at high), what cache tier (none → Redis → cluster → multi-tier), what autoscaling policy (scale on CPU at 70%, scale on RPS, or pre-warm for known patterns), and what compute model (serverless for spiky, containers for steady). Get the order of magnitude wrong and your architecture is built for the wrong system entirely. Get the peak-to-average ratio wrong and you either over-provision (paying 5–10× too much 90% of the time) or melt during traffic spikes (losing revenue and users exactly when they're most engaged). Traffic estimation is also how you detect when you're approaching the next tier threshold -- that's when you need to plan your next architectural evolution, not after you've already hit the wall. Think of it like fuel gauge for infrastructure: ignore it and you run out at the worst time.",
@@ -163,6 +197,34 @@
           "action": "Deploy globally with anycast DNS so every user hits the nearest PoP. Per-datacenter capacity planning with automated overflow. Traffic shifting on failures within seconds. This level typically requires a dedicated infrastructure/platform team."
         }
       ],
+      "interview": {
+        "prompt": "'How much traffic are we talking about?' The interviewer wants to see you derive it, not guess it.",
+        "senior": "Estimates DAU, multiplies by actions per user per day, divides by 86,400 to get average RPS, then applies a peak multiplier of 3 to 10x. Notes read vs write split.",
+        "staff": "Does the arithmetic quickly and rounds aggressively, then interprets it: 'that is 2K writes/sec average, maybe 20K at peak, which fits one well-tuned Postgres primary for now but not in 18 months at this growth rate.' Distinguishes traffic shapes (daily cycle, weekly, seasonal, viral spike) and picks a scaling strategy per shape. Calls out headroom explicitly: 'I want 40 to 50 percent headroom at peak so a cache failure does not become an outage.' Mentions load shedding as the plan for traffic beyond planned peak rather than pretending it will not happen.",
+        "probes": [
+          "Your traffic doubles every six months. When does your current design stop working, and what is the first thing to break?",
+          "A celebrity links to you and traffic spikes 100x for two hours. Walk me through what happens.",
+          "How much headroom do you keep, and how do you justify its cost?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "Convert 10M DAU with 20 requests per user per day into average RPS, then estimate peak.",
+          "a": "10M x 20 = 200M requests/day. Divided by 86,400 seconds is about 2,300 RPS average. With a 5x peak multiplier for consumer traffic, plan for roughly 12K RPS at peak."
+        },
+        {
+          "q": "What are typical peak-to-average ratios for B2B SaaS, consumer social, and seasonal e-commerce?",
+          "a": "B2B SaaS 5 to 10x (workday peaks, Monday 9am), consumer social 3 to 5x (evenings and weekends), seasonal e-commerce 50 to 100x (Black Friday)."
+        },
+        {
+          "q": "Your database handles 50K TPS and your peak is 40K. Is that enough headroom?",
+          "a": "No. That is 20 percent headroom. Aim for 40 to 50 percent at peak so a cache failure, a retry storm, or an unexpected spike does not become an outage."
+        },
+        {
+          "q": "Why does query performance often degrade non-linearly as data grows?",
+          "a": "Once indexes no longer fit in memory, every lookup becomes disk I/O instead of a memory access. A 60x larger dataset can be 600x slower, not 60x. Project data growth three years out and plan the sharding or archival transition before you hit that cliff."
+        }
+      ],
       "children": []
     },
     {
@@ -178,6 +240,9 @@
         "hyper"
       ],
       "short": "The single ratio that determines whether you need caches or shards",
+      "tldr": "The read/write ratio decides whether your bottleneck is serving data or storing it. Read-heavy systems scale with caches and replicas. Write-heavy systems scale with sharding, batching, and async pipelines. The two toolkits barely overlap.",
+      "keyInsight": "Caches and replicas only help reads. Sharding and queues only help writes. If you misjudge the ratio, you will spend months building the wrong kind of scaling and it will not move the needle.",
+      "mentalModel": "A library and a printing press. A library is read-heavy: add more copies (replicas) and a front desk that remembers popular answers (cache). A printing press is write-heavy: more copies do not help, you need more presses running in parallel (shards) and a loading dock that batches shipments (queues).",
       "detail": {
         "what": "The read/write ratio is the proportion of read operations to write operations in your workload. It's the single most important number for database architecture decisions because it determines whether your bottleneck is serving data (reads) or storing data (writes) -- and these require fundamentally different solutions. A 100:1 ratio (read-heavy) means for every write, there are 100 reads -- optimize for reading. A 1:100 ratio (write-heavy) means the opposite -- optimize for writing. Most applications are read-heavy (users browse 100× more than they post), but within a single product, different features have wildly different ratios: the social feed is 1000:1 (read-heavy), the analytics pipeline is 1:1000 (write-heavy), and the shopping cart is 5:1 (roughly balanced). Analyze per feature, not just system-wide, because each feature may need different infrastructure.",
         "why": "The same 100K RPS leads to completely different architectures depending on the read/write split. A 100K RPS read-heavy system (99% reads = 99K reads/s, 1K writes/s) is solved by adding cache (Redis serves 95% of reads from memory at 0.1ms each) + read replicas (remaining cache misses hit replicas, not the primary) -- relatively straightforward infrastructure that costs maybe $2K/month. A 100K RPS write-heavy system (1% reads, 99K writes/s) is an entirely different beast: you need write-optimized databases like Cassandra or DynamoDB (which use LSM-tree storage engines designed for high write throughput), horizontal sharding across many nodes, async write pipelines (Kafka buffering writes so the DB isn't overwhelmed), and potentially event sourcing -- infrastructure that costs $20K+/month and requires specialized expertise. Same total RPS, 10× different cost and complexity. Not knowing the ratio before designing is like an architect not knowing whether a building will house an office or a warehouse -- the foundations are completely different.",
@@ -275,6 +340,34 @@
           "action": "Global CDN for all cacheable HTTP responses. Write sharding with event-sourced pipeline (every write becomes an event in Kafka, consumed by multiple downstream systems -- search index, analytics, notification service -- independently). This is the architecture of Twitter, LinkedIn, and Uber at scale."
         }
       ],
+      "interview": {
+        "prompt": "'Is this system read-heavy or write-heavy?' is often the second question, and the interviewer is checking whether you know why it matters.",
+        "senior": "Estimates the ratio from the product ('a social feed is read 100 times for every post written') and says read-heavy means caching and replicas, write-heavy means sharding.",
+        "staff": "Separates the ratio per feature rather than per system: the timeline is 100:1 reads, but location updates in the same app are 1000:1 writes, and they need different storage. Spots writes disguised as reads (view counters, last-seen timestamps, analytics events on every page load) and moves them off the hot path into async batches. Explains the fan-out choice: write-time fan-out for most users, read-time fan-out for celebrities. Ties it to consistency: read-heavy systems tolerate replicas and stale reads, write-heavy systems need to decide where the single writer lives.",
+        "probes": [
+          "Which operations in this system look like reads but are actually writes?",
+          "Where would you put the fan-out, at write time or read time, and for whom?",
+          "At what point does a read replica stop helping?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "Why does adding read replicas not help a write-heavy system?",
+          "a": "Every replica must apply every write. Replicas multiply read capacity but leave write capacity unchanged on the single primary. Write-heavy systems need sharding (parallel primaries), batching, or async ingestion."
+        },
+        {
+          "q": "Give three examples of writes that masquerade as reads.",
+          "a": "View counters incremented on every page load, 'last seen' timestamps updated on every request, analytics or audit events emitted per read. Each turns a cheap read into a write on the hot path. Batch them, sample them, or send them async."
+        },
+        {
+          "q": "Describe Twitter's timeline fan-out and why it is a hybrid.",
+          "a": "On write, a tweet is pushed into the cached timeline of every follower (fan-out on write), which makes reads cheap. For celebrities with millions of followers that write becomes enormous, so their tweets are merged in at read time instead (fan-out on read). The hybrid keeps reads fast for the common case and writes bounded for the extreme case."
+        },
+        {
+          "q": "What does 'average ratio hides bursty writes' mean in practice?",
+          "a": "A system that is 50:1 reads on average may have moments (end-of-month billing, a bulk import, a flash sale) where writes dominate for an hour. Size the write path for those bursts or queue them; the average ratio will lie to you exactly when it matters."
+        }
+      ],
       "children": []
     },
     {
@@ -290,6 +383,9 @@
         "hyper"
       ],
       "short": "p50, p99, p999 targets per endpoint -- because averages lie",
+      "tldr": "Set latency targets as percentiles per endpoint tier, never as averages. p99 is the experience of your most active users, and in a system of many services the p99 of each hop compounds into the p50 of the whole. Budget latency like money.",
+      "keyInsight": "In a request that touches ten services, a user hits the p99 of at least one of them about 10 percent of the time. Tail latency is not an edge case at scale; it is the common case for your power users.",
+      "mentalModel": "A latency SLO is a budget, and every hop spends from it. 200ms total might be 20ms network, 30ms gateway and auth, 100ms for the slowest downstream, 50ms reserve. If one service overspends, the user pays. Staff engineers negotiate budgets between services the way finance negotiates between departments.",
       "detail": {
         "what": "Service Level Objectives for response time, expressed as percentiles. p50 (median) = the experience of your 'typical' user. p99 (99th percentile) = the experience of your worst 1% -- and these are often your most active, most valuable users (power users who make many requests are statistically more likely to hit the tail). p999 (99.9th) = the experience during rare but real worst-case scenarios. These are set per endpoint or per endpoint class, because /search (interactive, user waiting) and /generate-report (background, user went to get coffee) have fundamentally different requirements. The latency budget concept is critical: if your end-to-end p99 target is 200ms, and your API gateway takes 5ms, authentication takes 10ms, and the network round-trip to the user takes 50ms, your application has only 135ms to do its work -- including any database queries, cache lookups, and downstream service calls. Every component's latency is subtracted from your budget.",
         "why": "Latency directly impacts user behavior and revenue. Amazon famously measured that every 100ms of added latency cost them 1% of sales. Google found that a 500ms increase in search latency reduced traffic by 20%. For mobile users on spotty connections, the impact is even greater: 53% of mobile users abandon a page that takes >3 seconds (Google research). The latency SLO constrains your architecture more than almost any other requirement: a 10ms SLO forces data to be in memory at the edge (ruling out database round-trips entirely). A 200ms SLO allows one database round-trip but not three. A 5-second SLO allows complex computation. Without explicit targets, engineers optimize based on gut feel -- some will gold-plate a settings page to 5ms while the checkout flow languishes at 3 seconds. Per-percentile measurement matters because averages are liars: if 99 requests take 10ms and 1 takes 10 seconds, the average is 109ms -- which sounds fine but hides the fact that 1 in 100 users has a terrible experience. And that 1 in 100 isn't random -- it's often caused by cold caches, garbage collection pauses, or connection pool exhaustion, which correlate with high-load periods when you have the most users.",
@@ -396,6 +492,34 @@
           "action": "Edge compute for user-facing requests. Precomputed materialized views served from memory. Dedicated low-latency network paths (RDMA). This is the architecture of Google, Cloudflare, and Fastly -- it requires significant infrastructure investment but achieves latencies that are physically impossible with centralized architecture."
         }
       ],
+      "interview": {
+        "prompt": "'What latency do we need?' Most candidates say 'under 200ms'. The interviewer wants to know under 200ms for whom, measured where, at which percentile.",
+        "senior": "Proposes p99 targets per endpoint type, explains why averages hide the tail, and mentions that the budget must include network time, not just server time.",
+        "staff": "Allocates the budget across hops and names the one that will blow it (usually the database or a third-party call). Explains tail amplification and the mitigations: hedged requests, timeouts shorter than the caller's budget, limiting fan-out depth, caching the slow path. Connects latency to consistency ('if you want strong consistency across regions, you are paying 70ms of physics per write and no cleverness removes it'). Ties SLOs to error budgets and says what the team does when the budget is burned.",
+        "probes": [
+          "A single request fans out to 20 backends, each with p99 of 50ms. What does the user experience?",
+          "How would you cut p99 without touching p50?",
+          "Your p99 target is 100ms and the database is 1,500km away. Can you hit it?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "Why is p99 more important than average latency for business outcomes?",
+          "a": "The p99 is experienced by your most active users, who make the most requests and are statistically the most likely to hit the tail. Averages are dragged down by cheap requests and hide the experience of the people who pay you."
+        },
+        {
+          "q": "What is tail latency amplification?",
+          "a": "When a request fans out to N services, the chance of hitting at least one slow hop is 1 minus (0.99)^N. With 10 hops that is about 10 percent of requests seeing some service's p99; with 100 hops it is 63 percent. The system's p50 becomes the component's p99."
+        },
+        {
+          "q": "Name four techniques to reduce tail latency.",
+          "a": "Hedged requests (send a second request after a delay and take the first response), timeouts tighter than the caller's budget with fallback, reducing fan-out depth and width, caching or precomputing the slow path, and keeping replicas warm so no request pays a cold start."
+        },
+        {
+          "q": "What did Amazon find about 100ms of added latency?",
+          "a": "Roughly 1 percent of revenue lost per 100ms added. Latency is a revenue metric, which is why it deserves per-endpoint SLOs rather than a single global target."
+        }
+      ],
       "children": []
     },
     {
@@ -411,6 +535,9 @@
         "hyper"
       ],
       "short": "Nines of uptime vs cost of redundancy -- every nine costs 3–10× more",
+      "tldr": "Availability is priced in nines, and each nine costs roughly 3 to 10x more than the last. Pick the target per feature based on the cost of downtime, convert it into allowed minutes per month, and then spend that error budget deliberately.",
+      "keyInsight": "A system is only as available as the product of its serial dependencies. Five components at 99.9 percent in series give you 99.5 percent, not 99.9. Every nine you promise to customers is a nine you must extract from every dependency in the critical path.",
+      "mentalModel": "Nines are an insurance premium. 99 percent is liability-only, 99.99 percent is full coverage with a dedicated adjuster. Nobody buys the top policy for every car in the fleet; you buy it for the one that cannot be off the road. Likewise, your checkout path and your admin reports deserve different policies.",
       "detail": {
         "what": "The percentage of time your service must be operational, measured over a rolling window (typically monthly or yearly). This translates to concrete allowed downtime: 99% = 7.3 hours/month (acceptable for internal tools), 99.9% = 43 minutes/month (standard for consumer apps), 99.95% = 22 minutes/month (standard B2B SaaS), 99.99% = 4.4 minutes/month (financial services, enterprise SaaS), 99.999% = 26 seconds/month (telecom, medical devices, payment rails). 'Availability' specifically means: can a healthy user complete a meaningful operation? A system that returns 200 OK with an empty page is 'up' by some definitions but 'down' by the one that matters. Define availability in terms of successful business operations, not just HTTP status codes. Also distinguish between 'planned' and 'unplanned' downtime -- from your users' perspective, the system is equally unavailable during a 'planned maintenance window' as during an unplanned outage. Modern SLOs include all downtime; modern engineering deploys without downtime.",
         "why": "The nines ladder is not linear in cost -- it's exponential. Going from 99.9% to 99.99% costs roughly 3–5× more because you need: multi-AZ deployment (spreading across independent failure domains in the same region), automated health checks and failover (no human in the loop -- the system detects and recovers within seconds), redundant components at every layer (two load balancers, two DB instances, two cache clusters), and sophisticated monitoring/alerting. Going from 99.99% to 99.999% costs another 4–10× on top because you need: multi-region deployment (surviving an entire AWS region going offline), active-active architecture (both regions serving traffic simultaneously, not warm standby), cell-based deployment (isolating failures to a small percentage of users), zero-downtime deploys (canary + progressive rollout), and a dedicated SRE team (because at this level, every deploy and every config change is a potential outage vector). These costs compound -- 99.999% might cost 20–50× what 99.9% costs. The business must make this decision explicitly, not leave it to engineering to 'make it reliable.' A B2C social app at 99.9% is perfectly fine; a payment processing system at 99.9% would lose customers. Pick deliberately.",
@@ -518,6 +645,34 @@
           "action": "Multi-region active-active with zero-downtime deploys. Cell-based isolation. N+2 redundancy at every layer. Continuous chaos engineering in production. This level is where companies like Stripe, Visa, and major cloud providers operate."
         }
       ],
+      "interview": {
+        "prompt": "'How available does this need to be?' The trap is answering 'as available as possible'.",
+        "senior": "Proposes a nines target, converts it to downtime per month, and explains that higher availability requires redundancy (multi-AZ, failover) and costs more.",
+        "staff": "Assigns different targets to different paths (checkout 99.99, search 99.9, reporting 99). Computes availability of the composed system from its dependencies and points out that the third-party payment provider caps the whole thing. Introduces the error budget as a decision tool: when it is spent, feature work pauses. Distinguishes availability from durability and from correctness ('the site was up but every order was lost' is an availability win and a business catastrophe). Names planned maintenance explicitly and whether it counts.",
+        "probes": [
+          "Your system calls three dependencies in series, each at 99.9 percent. What can you promise?",
+          "What do you do in the month after you have burned the entire error budget?",
+          "How is 11 nines of durability different from 4 nines of availability?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "Convert 99.9, 99.95, and 99.99 percent into allowed downtime per month.",
+          "a": "99.9 percent is about 43 minutes per month. 99.95 percent is about 22 minutes. 99.99 percent is about 4.4 minutes. Each step roughly halves or quarters your allowed outage while multiplying cost several times."
+        },
+        {
+          "q": "Three serial dependencies each at 99.9 percent: what is the composed availability?",
+          "a": "About 99.7 percent (0.999 cubed). Serial dependencies multiply unavailability. Parallel redundancy does the opposite: two independent 99 percent replicas give 99.99 percent if failover is instant and failures are independent."
+        },
+        {
+          "q": "What is an error budget and what is it for?",
+          "a": "The allowed unreliability implied by the SLO (0.1 percent of requests for a 99.9 percent SLO). It turns reliability into a spendable resource: ship risky changes while budget remains, freeze and fix when it is exhausted. It makes the velocity-versus-reliability argument quantitative instead of political."
+        },
+        {
+          "q": "Why can a system with 100 percent uptime still fail its users?",
+          "a": "Availability measures whether the service responds, not whether it is correct. Serving stale, wrong, or lost data counts as up. Pair availability SLOs with correctness checks (reconciliation, data integrity monitors) or you will be green during your worst incident."
+        }
+      ],
       "children": []
     },
     {
@@ -533,6 +688,9 @@
         "hyper"
       ],
       "short": "Strong vs eventual -- the most misunderstood decision in distributed systems",
+      "tldr": "Consistency defines what a read returns after a write. Strong consistency is simple to reason about and expensive to distribute. Eventual consistency is cheap and scalable but must be designed into the UX. Choose per feature: the bank balance is strong, the like count is eventual.",
+      "keyInsight": "The moment you add a read replica you have chosen eventual consistency, whether you meant to or not. Most consistency bugs are not caused by picking the wrong model; they are caused by never noticing a choice was made.",
+      "mentalModel": "A shared whiteboard versus a group chat. Strong consistency is one whiteboard in one room: everyone sees the same thing, but everyone has to walk to that room. Eventual consistency is a group chat: messages arrive at everyone eventually, cheaply and from anywhere, but for a moment two people can be looking at different histories. Design the product so that moment is harmless.",
       "detail": {
         "what": "Consistency defines what a read returns after a recent write. This sounds simple, but it's the deepest rabbit hole in distributed systems. Strong consistency: every read sees the most recent write, everywhere, always -- the system behaves as if there's a single copy of the data. This is what your brain expects, what SQL transactions provide, and what makes reasoning about correctness easy. Eventual consistency: after a write, replicas may temporarily disagree; reads may return stale data for some window (milliseconds to minutes); eventually all replicas converge to the same value. This is cheaper, faster, and more available -- but the application must handle the 'eventually' part gracefully. Read-your-writes (session consistency): YOU always see YOUR OWN most recent write immediately, but you may see other users' data with some staleness. This is the pragmatic middle ground that most applications actually need. The critical insight: different operations in the same system should have different consistency requirements. Your bank balance must be strongly consistent (showing a stale balance could cause overdrafts). Your like count can be eventually consistent (showing 4,201 likes instead of 4,203 for 5 seconds is irrelevant). Your shopping cart should have read-your-writes consistency (you must see the item you just added, but it's OK if your friend sees it a second later). Per-feature analysis is the only correct approach.",
         "why": "Strong consistency requires coordination -- algorithms like Paxos, Raft, or two-phase commit must ensure multiple nodes agree before acknowledging a write. This coordination has unavoidable costs: latency (a quorum write within a datacenter takes 5–15ms; across regions it's 30–80ms as replicas separated by the speed of light exchange messages) and availability (the CAP theorem proves that during a network partition, a system must choose between consistency and availability -- you can't have both). Eventual consistency avoids coordination: write locally, replicate in the background, and resolve any conflicts later. This gives you sub-millisecond writes and availability during partitions -- but the application must handle the possibility that two nodes have different values for the same data. Picking strong everywhere wastes 10–100ms per write for data where staleness was perfectly fine (like a view counter). Picking eventual everywhere creates user-visible bugs (user adds item to cart, refreshes, item appears gone because the read hit a stale replica). The cost of getting this wrong: strong-everywhere means your application is slower and less available than necessary. Eventual-everywhere means users see confusing behavior that erodes trust. Per-feature analysis means each feature gets exactly the consistency it needs at the right cost.",
@@ -636,6 +794,34 @@
           "action": "Choose per-feature: Spanner or CockroachDB for globally strong ($$$ + ~50ms writes), DynamoDB Global Tables or Cassandra for AP (cheap + fast but eventually consistent). Implement conflict resolution for eventually consistent data (last-writer-wins for simple, custom merge for complex). This is the hardest problem in distributed systems -- budget significant design time."
         }
       ],
+      "interview": {
+        "prompt": "'Does this need strong consistency?' The interviewer is checking whether you know the cost, not whether you know the definition.",
+        "senior": "Explains strong vs eventual, invokes CAP, and says financial data needs strong consistency while social data can be eventual.",
+        "staff": "Decomposes the system into operations and assigns a model to each, then names the mechanism: read-your-writes via session pinning to the primary, monotonic reads via replica stickiness, causal consistency for comment threads, linearizable only for the ledger. Replaces CAP with PACELC ('even with no partition, you trade latency for consistency on every write'). Explains how to make eventual consistency invisible in the UX (optimistic UI, idempotent retries, showing the user their own write immediately). Avoids distributed transactions across services and reaches for sagas with compensation instead, while admitting what sagas cannot give you.",
+        "probes": [
+          "A user posts a comment and refreshes. It is gone. What happened and how do you fix it?",
+          "Where in this design would you accept a stale read, and for how long?",
+          "Order, payment, and inventory live in three services. How do you keep them consistent without 2PC?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "What is read-your-writes consistency and how do you implement it with replicas?",
+          "a": "A guarantee that a user always sees their own writes. Implement by routing that user's reads to the primary for a short window after a write (session pinning), or by tracking the write's log position and only reading from replicas that have caught up to it."
+        },
+        {
+          "q": "Explain PACELC in one sentence and why it matters more than CAP day to day.",
+          "a": "If there is a Partition, choose Availability or Consistency; Else, choose Latency or Consistency. Partitions are rare, but the latency-versus-consistency tradeoff is paid on every single write, so PACELC describes your normal operating cost, not just your disaster mode."
+        },
+        {
+          "q": "Why does Amazon's shopping cart use eventual consistency on purpose?",
+          "a": "An unavailable cart loses sales immediately; a cart that occasionally shows a deleted item for a moment loses nothing. They chose availability and designed the merge (union of versions) so the worst case is a resurrected item the user can remove, never a lost one."
+        },
+        {
+          "q": "What is a saga and what does it not give you?",
+          "a": "A sequence of local transactions across services, each with a compensating action to undo it if a later step fails. It gives you eventual atomicity without distributed locks. It does not give you isolation: other requests can observe intermediate states, so you must design for that visibility."
+        }
+      ],
       "children": []
     },
     {
@@ -651,6 +837,9 @@
         "hyper"
       ],
       "short": "Single region → global active-active -- constrained by physics and law",
+      "tldr": "Geography is physics plus law. Light in fiber costs about 5ms per 1,000km, so distant users need edges, caches, or regional deployments. Data residency laws decide where bytes may live. Go multi-region only when latency or law forces it, and never add regions for marketing.",
+      "keyInsight": "Multi-region compute is easy and multi-region data is hard. Putting servers in Frankfurt while the database stays in Virginia makes European users slower, not faster, because every request now crosses the Atlantic twice.",
+      "mentalModel": "Branch offices and the head office. A branch (edge or regional cache) can answer common questions locally and instantly. Anything that needs the master ledger (writes, strong reads) still travels to head office and pays the round trip. Opening a branch without deciding what it is allowed to decide locally just adds a stop on the journey.",
       "detail": {
         "what": "Geography in system design has two dimensions: physics and law. The physics dimension: where your users are determines the minimum network latency they'll experience. Speed of light in fiber is ~5ms per 1,000km, with real-world routing adding ~2× overhead. London to New York is ~5,500km = ~70ms minimum round-trip. London to Sydney is ~17,000km = ~280ms minimum. No amount of software optimization can break the speed of light -- if your server is in Virginia and your user is in Tokyo, 150ms of latency is baked in before your code even runs. The law dimension: data protection regulations increasingly require that personal data stays within specific geographic boundaries. GDPR (EU) effectively requires EU citizen data to be stored and processed in the EU or in countries with adequate data protection laws. CCPA (California) has similar restrictions. LGPD (Brazil), PIPL (China), and dozens of other national laws have their own requirements. China is the extreme case: the Great Firewall means serving Chinese users requires infrastructure inside China with a local partner (AWS has a China region operated by Sinnet; Azure has one operated by 21Vianet). The combination of physics and law means your geographic deployment strategy isn't optional -- it's constrained by where your users are and where their data legally must reside.",
         "why": "Ignoring geography creates two types of failure. The latency failure: your app works great in your office in San Francisco, but users in Germany experience 300ms+ latency on every API call because each request crosses the Atlantic twice. They churn, you blame 'the product,' but it was infrastructure. The compliance failure: you've been storing EU user data in us-east-1 for two years. A GDPR audit reveals this. Depending on the severity, fines can reach 4% of global annual revenue (€20M minimum). Even without fines, the remediation effort is typically 6+ months of engineering time. The proactive approach: understand your user distribution from day 1, deploy in the right region, and have a clear plan for when you need to expand. For most startups, this means: pick the single region closest to most of your users, use a CDN for static content globally, and save multi-region for when real demand (or compliance) requires it.",
@@ -753,6 +942,34 @@
           "to": "hyper",
           "trigger": "Latency SLO <50ms globally (meaning edge compute is required) or >1B global users",
           "action": "Active-active multi-region with anycast routing. Per-PoP edge compute for application logic. Per-jurisdiction data isolation with independent encryption and audit. This is the architecture of Cloudflare, Google, and Facebook -- it requires a network engineering team."
+        }
+      ],
+      "interview": {
+        "prompt": "'Our users are in the US, EU, and India.' The interviewer wants to know whether you reach for multi-region reflexively or deliberately.",
+        "senior": "Proposes a CDN for static assets and regional deployments, mentions GDPR, and talks about active-active versus active-passive.",
+        "staff": "Starts with the latency math (NY to London 70ms round trip, to Sydney 250ms) and the SLO to decide whether edge caching suffices or a regional write path is truly required. Separates read locality (easy: replicas and CDN) from write locality (hard: conflict resolution, home-region ownership of each user or tenant). Treats residency as a data-model concern: tag each tenant with a home region and make the routing layer enforce it. Lays out the evolution: single region plus CDN, then read replicas in region two, then home-region writes with cross-region async, then true active-active only for the few datasets that need it. Names the operational cost of each region in people, not just dollars.",
+        "probes": [
+          "What is the minimum round trip between London and Sydney, and what does that do to a 100ms SLO?",
+          "How do you handle a user who moves from the EU to the US?",
+          "Which data in this system could never be active-active, and why?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "Estimate the minimum round-trip time between New York and London, and explain the number.",
+          "a": "About 5,500km of fiber at roughly 5ms per 1,000km one way is 28ms, doubled for the round trip and multiplied by real-world routing overhead gives about 70ms. No software optimization can beat it; only moving data closer does."
+        },
+        {
+          "q": "Why is 'multi-region compute without multi-region data' an anti-pattern?",
+          "a": "Compute in a distant region still has to reach the single-region database for most requests, so each request now pays two cross-region hops instead of one. Users get slower, not faster, and you pay for the extra region."
+        },
+        {
+          "q": "What is a home-region model and what problem does it solve?",
+          "a": "Each user or tenant is assigned a home region that owns their writes. Other regions proxy writes to the home region and serve reads from local replicas. It avoids write conflicts while still giving read locality and satisfying residency laws, at the cost of slower writes for traveling users."
+        },
+        {
+          "q": "Name the three triggers for moving from one region to two.",
+          "a": "More than 20 to 40 percent of traffic from a second geography, a latency SLO that physics cannot meet from one region, or a legal data residency requirement. Marketing is not a trigger."
         }
       ],
       "children": []

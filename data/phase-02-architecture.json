@@ -11,6 +11,9 @@
     "hyper"
   ],
   "short": "Monolith → modular monolith → microservices → platform -- match your architecture to your team, not your ambition",
+  "tldr": "Architecture style is how you carve the system into deployable units, and the right cut is dictated by team size and organizational maturity, not ambition. Monolith to about 20 engineers, modular monolith to about 100, microservices beyond that, and a platform team once hundreds of engineers wait on infrastructure.",
+  "keyInsight": "Microservices are an organizational scaling technique that happens to have technical consequences. They let 50 teams deploy independently; they do not make one team faster. Adopting them before you have the coordination problem they solve buys you all the costs and none of the benefits.",
+  "mentalModel": "A house versus a city. A monolith is a house: one building, one set of keys, everything a short walk away, renovations disturb everyone. Microservices are a city: independent buildings, separate owners, roads and traffic between them, and you need utilities, zoning, and police (a platform) to keep it working. Nobody builds a city for a family of four.",
   "detail": {
     "what": "Architecture style is the highest-leverage decision you'll make: how do you carve your system into deployable units of code? There are four major stops on the spectrum. (1) Monolith: one application, one repository, one deployment artifact, one running process. All components communicate via in-process function calls -- zero network latency, zero serialization, one stack trace when things go wrong. This is where every successful company started, and where many thriving ones remain. (2) Modular monolith: still one deployable unit, but the code is internally organized into strictly bounded modules (e.g., 'auth,' 'billing,' 'catalog,' 'notifications'), each with a public API that other modules call, and private internals that are off-limits. Think of it as apartments in a building -- shared structure, private interiors, defined doorways. This is the sweet spot for most growing companies. (3) Microservices: the system is decomposed into many small, independently deployable services. Each service owns its own database, its own deployment pipeline, its own on-call rotation. Communication happens over the network via REST, gRPC, or async events. The organizational insight: each service is owned by exactly one team, and that team can ship without coordinating with anyone else. The cost: every internal call is now a network call with latency, failure modes, retries, timeouts, and observability requirements. You've traded code complexity for operational complexity. (4) Distributed platform: microservices at such scale that a dedicated platform engineering team builds shared infrastructure primitives (compute scheduling, deployment pipelines, observability, secrets management, service templates) as self-service internal products. Product teams consume the platform; they don't build infrastructure. Cell architecture deploys identical full-stack copies, each serving a fraction of users, so a bad deploy or rogue tenant can't take down the whole system. Conway's Law is the invisible force behind all of this: your system architecture will inevitably mirror your team communication structure. Fight it and you lose. Embrace it and architecture becomes natural: one team → one service (or module). Two teams sharing a service → conflict. One team spread across three services → each service is neglected.",
     "why": "This decision shapes everything downstream -- not just technology, but how your organization collaborates, how fast you ship features, how often things break in production, how much operational toil your engineers carry, and how expensive your infrastructure is to run. The seductive trap is premature microservices: 'Netflix uses microservices, Amazon uses microservices, so we should too!' But Netflix had ~5,000 engineers when they adopted microservices at scale. Amazon had a similar order of magnitude when the famous 2002 Bezos API mandate was issued. Microservices carry roughly 10× the operational overhead of a monolith -- you need container orchestration (Kubernetes), service discovery (Consul, DNS), distributed tracing (Jaeger, Datadog), circuit breakers (Resilience4j), an API gateway (Kong, Envoy), a service mesh (Istio, Linkerd), contract testing (Pact), independent CI/CD pipelines per service, and a team mature enough to operate all of it. For a 5-person startup, this overhead consumes 80% of engineering time, leaving 20% for the product that actually makes money. The right architecture is always the simplest one that solves your actual problems. If your problem is 'we need to ship features fast with a small team,' the answer is a monolith. If your problem is 'our 200-engineer org can't coordinate deploys on a single codebase,' the answer is microservices. If you don't have the problem, don't buy the solution. The cost of getting this wrong in both directions is severe: a premature microservices adoption slows a startup to a crawl as engineers drown in infrastructure work. A delayed decomposition turns a monolith into a ball of mud where every change risks breaking something unrelated, deploy conflicts are daily, and the bravest engineer is the one who merges on Friday. The modular monolith is the escape hatch -- it gives you team independence (each team owns a module) without the operational burden (one deploy, one process, one database cluster). It's the architecture most companies should be running and the one least discussed at conferences because it's not as exciting to talk about.",
@@ -110,6 +113,34 @@
       "action": "Dedicated platform engineering team (target ratio: 1 platform engineer per 8–12 product engineers). Build an internal developer platform: service templates, self-service infra provisioning, unified observability, deployment pipelines, service catalog (Backstage). Adopt cell architecture for blast-radius isolation. Service mesh (Istio/Linkerd) for consistent security and observability across all services."
     }
   ],
+  "interview": {
+    "prompt": "'Would you use microservices for this?' is a bait question. The interviewer is testing whether you reason from constraints or from fashion.",
+    "senior": "Says it depends on team size and scale, recommends starting with a monolith and extracting services later, and lists the operational costs of microservices.",
+    "staff": "Anchors on Conway's Law and the team's actual shape: how many teams, how often they collide on deploys, which modules need radically different scaling. Recommends a modular monolith with enforced boundaries as the default and names the specific triggers for extraction (a module with 10x the scale needs of the rest, a team that is blocked weekly by another team's deploy, a compliance boundary). Explains the distributed monolith failure mode and how to detect it (services that must deploy together, shared databases). Talks about the sequencing and the cost of a platform team, and about reversibility: Segment went back to a monolith, and that was the right call.",
+    "probes": [
+      "How would you know your monolith has become a problem rather than just large?",
+      "Which module would you extract first and what would you need in place before doing it?",
+      "What does a distributed monolith look like, and how do you prevent one?"
+    ]
+  },
+  "quiz": [
+    {
+      "q": "What is Conway's Law and how does it bear on architecture style?",
+      "a": "Organizations design systems that mirror their communication structure. If you have one team, you will get one system; if you force microservices onto one team, you get a distributed monolith. Reshape the org and the architecture together, or the architecture will drift back to match the org."
+    },
+    {
+      "q": "What is a distributed monolith and what are its tell-tale signs?",
+      "a": "Services that look independent but are not: they share a database, must deploy together, fail together, and call each other synchronously in deep chains. You pay microservice costs (network, ops, debugging) with monolith coupling. Signs: coordinated releases, shared tables, a change in one service breaking three others."
+    },
+    {
+      "q": "Give the rough team-size thresholds for monolith, modular monolith, microservices, and platform.",
+      "a": "Monolith works to roughly 20 engineers. A modular monolith with enforced boundaries carries you to about 100. Microservices pay off beyond 100 engineers across many teams. A dedicated platform team becomes necessary around 500 engineers, when teams wait weeks on infrastructure."
+    },
+    {
+      "q": "Why did Segment consolidate microservices back into a monolith?",
+      "a": "They had more than 140 services for a small team: shared libraries drifted across versions, every change required touching dozens of repos, and operational load crushed velocity. Consolidating restored shared code, one test suite, and one deploy. The lesson: service count must match team count, not feature count."
+    }
+  ],
   "children": [
     {
       "name": "Monolith",
@@ -121,6 +152,9 @@
         "small"
       ],
       "short": "Single deployable unit -- the fastest path from zero to product, and the right choice for small teams",
+      "tldr": "One repository, one artifact, one process. In-process calls instead of network hops, one transaction boundary, one thing to deploy and debug. It is the fastest path to product and remains the right choice until team size, not traffic, makes it slow.",
+      "keyInsight": "A monolith's ceiling is organizational, not technical. Stack Overflow serves over a billion page views a month from a monolith. What breaks a monolith is 30 engineers merging into one deploy queue, not 30K requests per second.",
+      "mentalModel": "A single workshop with one master craftsperson and a few apprentices. Every tool is within arm's reach, nobody waits for a delivery between steps, and the whole product is built on one bench. It is unbeatable until the workshop needs twenty craftspeople who keep bumping elbows.",
       "detail": {
         "what": "All application code lives in one repository, builds into one artifact (a Docker image, a JAR, a deployable bundle), and deploys as one unit to one or more servers. Internal communication is in-process function calls -- no network latency (0ms vs 1–5ms per microservice hop), no serialization overhead, no partial failures. State is shared through one database (or a few). One deploy means everything updates atomically -- no version skew between services, no backward-compatibility headaches. Debugging is a single stack trace. Testing is one test suite. The mental model is simple: it's just one program. This is how every successful software company started -- Google, Amazon, Netflix, Twitter, Shopify, Stripe -- all began as monoliths and decomposed only when the monolith became a measurable bottleneck, which typically happens at 20–100+ engineers, not at 20K RPS. The monolith has been unfairly maligned by conference culture; in reality, it remains the optimal architecture for the vast majority of software projects in existence.",
         "why": "The monolith is the fastest way to go from zero to a working product. Every alternative adds overhead: microservices add network calls, distributed debugging, and infrastructure per service. Modular monolith adds boundary enforcement discipline. The monolith just... works. You write code, you deploy it, it runs. When something breaks, you look at one log, one stack trace, one process. When you need to refactor, you change one codebase with your IDE's refactoring tools -- no coordinated deploys across services, no API version negotiations, no 'which service owns this data?' debates. It's the wrong choice only when you have so many engineers that coordination on the codebase becomes the bottleneck -- typically not until 20+ engineers, and even then, a modular monolith is the next step, not microservices. DHH (creator of Rails) has been vocal about this: Basecamp and HEY.com run on monoliths serving millions of users with a small team, and they ship faster than most microservices-based companies. The monolith lets you focus on the thing that actually matters at early stage: finding product-market fit.",
@@ -196,6 +230,34 @@
           "action": "Do NOT jump to microservices. Modularize internally first: define bounded contexts using Domain-Driven Design thinking. Enforce module boundaries with tooling (packwerk for Rails, ArchUnit for Java, dependency-cruiser for JS). Give each module a clear public API. Extract heavy background processing to a separate worker process (same codebase, separate deploy target). This gets you another 2–5× of organizational scale before you need true service extraction."
         }
       ],
+      "interview": {
+        "prompt": "'Why not just build a monolith?' Sometimes the interviewer asks this after you have drawn twelve boxes.",
+        "senior": "Lists benefits (simplicity, atomic transactions, easy debugging) and limits (scaling is all-or-nothing, one slow endpoint hurts everything, deploys are coupled).",
+        "staff": "Makes the case for the monolith with numbers: for a team of eight at 2K RPS, it ships faster and runs cheaper, and the risks are mitigated with internal module boundaries, separate worker pools for slow endpoints, and a read replica. Names the real failure mode, the big ball of mud, and the discipline that prevents it. Lays out the exit strategy in advance: keep boundaries clean so the first extraction is a weekend, not a year. Knows the exceptions where a monolith is wrong from day one (a component with a wildly different runtime, like a GPU inference service, or a hard compliance boundary).",
+        "probes": [
+          "One endpoint does a 30-second PDF export and it is starving the API. How do you fix that inside a monolith?",
+          "What discipline keeps a monolith from becoming a big ball of mud?",
+          "What would make you extract the first service, and which one?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "What is the actual limit that forces you off a monolith, and what is not?",
+          "a": "The limit is coordination: too many engineers in one deploy queue, CI over 30 minutes, weekly merge conflicts, modules needing different release cadences. Traffic is usually not the limit; a monolith scales horizontally behind a load balancer just fine."
+        },
+        {
+          "q": "How do you stop one slow endpoint from degrading the whole monolith?",
+          "a": "Separate worker pools or process groups per endpoint class (interactive versus batch), timeouts per handler, and moving long work to background jobs. Same codebase, different deployment groups."
+        },
+        {
+          "q": "What does 'deploying the entire world for a one-line change' cost, and how is it mitigated?",
+          "a": "Every deploy carries full risk and a full test run, so deploy frequency falls and batches grow. Mitigate with fast CI, feature flags to decouple deploy from release, canary rollouts, and automated rollback. The goal is to make the whole-world deploy boring, not rare."
+        },
+        {
+          "q": "Name two companies running large monoliths successfully and the lesson from each.",
+          "a": "Shopify's monolith serves enormous Black Friday traffic with enforced internal components, showing modularity does not require services. Stack Overflow serves over a billion page views a month on a handful of servers, showing that a monolith with aggressive caching scales far beyond most companies' needs."
+        }
+      ],
       "children": []
     },
     {
@@ -208,6 +270,9 @@
         "medium"
       ],
       "short": "Internal modules with enforced boundaries -- the sweet spot most companies should be running",
+      "tldr": "Still one deployable, but internally split into modules with explicit, enforced interfaces and private data. You get most of the organizational benefits of services (clear ownership, parallel work, extractable boundaries) without the network, operational, and consistency costs. This is the default most companies should be running.",
+      "keyInsight": "Module boundaries are only real if the build breaks when you cross them. A modular monolith without enforcement decays into a monolith in about six months because the shortcut is always one import away.",
+      "mentalModel": "An apartment building with separate units. One structure, one address, one boiler, but each unit has its own door, its own lock, and a lease that says who may enter. You can later convert a unit into its own building because the walls were already load-bearing.",
       "detail": {
         "what": "Still one deployable unit, but internally divided into well-defined modules (also called 'components,' 'packages,' or 'bounded contexts') with explicit, enforced interfaces. Each module owns a domain: auth, billing, catalog, payments, notifications. Modules communicate through documented public APIs (function calls, event dispatch within the process), NOT by reaching into each other's database tables or internal classes. The critical word is 'enforced' -- not just 'we agreed to respect boundaries in a meeting.' Tooling prevents violations: a linter fails CI if module A imports module B's internal class. The database can be one cluster but with schema-per-module: each module's tables are private, and cross-module data access goes through the module's API, never through direct SQL joins. This means you can extract any module into a separate service later with minimal refactoring because the boundaries already exist -- the network boundary simply replaces the function-call boundary. Think of it as 'microservices without the network' -- you get team independence and clean boundaries without the operational overhead of distributed systems.",
         "why": "The modular monolith occupies the sweet spot between 'simple but coupled' (plain monolith) and 'decoupled but operationally complex' (microservices). It gives you team autonomy -- each team owns a module and can iterate within it freely, with confidence that their changes won't break another team's module because the interface is enforced. Deploy is still one unit (simple CI/CD, one artifact, atomic updates). Testing is still one process (fast, no network mocks required). Debugging still gives you one stack trace. But the codebase is decoupled enough that teams can work in parallel without merge conflicts, and the internal APIs serve as documentation of how components interact. This is the architecture most companies between 20 and 100 engineers should be running -- and many should stay here much longer. Shopify, at 11,000+ employees, still runs a modular monolith as their core. The modular monolith is also the safest preparation for eventual microservices extraction: because boundaries are already proven and stable, extracting a module to a service is a surgical, low-risk operation rather than the 'excavate tangled spaghetti' horror show of extracting from a big ball of mud.",
@@ -283,6 +348,34 @@
           "action": "Extract the highest-scale, most stable-boundary modules into separate services. Start with stateless services (API gateway, notification dispatch) because they don't require data migration. For stateful extractions: use the strangler fig pattern -- new traffic goes to the new service, old traffic still hits the monolith, gradually migrate. Introduce an API gateway (Kong, AWS API Gateway, Envoy) for external traffic routing between the monolith and extracted services."
         }
       ],
+      "interview": {
+        "prompt": "The interviewer says 'we have 60 engineers and a monolith that hurts; what would you do?' Jumping straight to microservices is the trap.",
+        "senior": "Proposes a modular monolith with bounded contexts, mentions domain-driven design, and suggests extracting services later when needed.",
+        "staff": "Starts by diagnosing what actually hurts (deploy queue, test time, ownership confusion, one module needing different scaling) because each has a different fix. Lays out the mechanics of enforcement: module-private tables, a dependency linter or build rule that fails on cross-module imports, public interfaces in one place, ownership in CODEOWNERS. Treats the shared database as the real coupling and describes a path to per-module schemas with no cross-module joins. Describes the extraction playbook for later: the module's interface becomes the API, its tables move with it, and the boundary has already been tested in production for a year. Is honest about the cost: boundary discipline is a continuous tax and someone must own it.",
+        "probes": [
+          "How do you enforce module boundaries so they survive a hiring spree?",
+          "Two modules both need the users table. What do you do?",
+          "What is your test that a module is ready to become a service?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "What distinguishes a modular monolith from a plain monolith?",
+          "a": "Explicit module boundaries that are enforced by tooling: each module owns its tables, exposes a small public interface, and cannot import another module's internals. Same deployable, but coupling is governed rather than accidental."
+        },
+        {
+          "q": "What is the single most common way modular monoliths decay?",
+          "a": "Shared database tables across modules. Once two modules read and write the same table, their boundary exists only on paper. Enforce module-private schemas and force cross-module access through interfaces or events."
+        },
+        {
+          "q": "What makes a module a good first candidate for extraction into a service?",
+          "a": "It has a stable, narrow public interface, no cross-module joins, a clear team owner, and a concrete reason to be separate (different scaling profile, different release cadence, or a compliance boundary). Extracting a module without a reason just adds a network hop."
+        },
+        {
+          "q": "How did Shopify keep a multi-million-line Rails monolith healthy?",
+          "a": "They componentized it: packages with declared dependencies, a tool (Packwerk) that flags boundary violations in CI, and gradual cleanup of existing violations. Modularity became a measurable, enforced property rather than an aspiration."
+        }
+      ],
       "children": []
     },
     {
@@ -295,6 +388,9 @@
         "large"
       ],
       "short": "Independent services with API contracts -- the architecture of 100+ engineer organizations",
+      "tldr": "Many independently deployable services, each owning its data, its process, its failure domain, and its team. The payoff is autonomy for 100+ engineers. The price is network latency, partial failure, data consistency across boundaries, and a platform to run it all. Pay the price only when the autonomy is worth it.",
+      "keyInsight": "A service boundary is a promise that two things will change independently. Draw it where the organization actually changes independently, not where the domain model looks tidy. Every boundary you draw wrong becomes a synchronous call chain you will debug at 3am.",
+      "mentalModel": "A city of specialist shops. Each shop has its own staff, inventory, and hours, and the city thrives because nobody waits for anyone else to open. But now you need roads (the network), a phone book (service discovery), traffic lights (rate limits and circuit breakers), and a city hall (the platform team). The shops are the easy part.",
       "detail": {
         "what": "The system is decomposed into many independently deployable services. Each service adheres to five ownership principles: (1) owns its data store -- no shared database, ever; each service has a private DB that no other service can access directly; (2) runs in its own process(es) -- separate container, separate scaling, separate failure domain; (3) is owned by exactly one team -- the team builds it, deploys it, monitors it, and gets paged when it breaks at 3am; (4) exposes a versioned contract -- REST, gRPC, or async events with a schema -- that is the only way other services interact with it; (5) deploys on its own pipeline -- Team A deploys without waiting for Team B, without coordinating, without fear of breaking Team B's code. Services communicate over the network: synchronously via RPC (REST/gRPC -- request/response, caller waits) or asynchronously via events (Kafka/SQS -- fire and forget, consumer processes later). The shift from monolith to microservices is fundamentally an organizational shift, not a technical one: you're trading code-level coupling for network-level coupling, and in-process coordination for inter-team coordination via contracts.",
         "why": "At sufficient organizational scale (100+ engineers), the bottleneck shifts from technology to human coordination. A 200-person engineering org working on one monolith experiences: multi-hour deploy queues (50 PRs waiting to merge and deploy), constant merge conflicts (5 teams modifying the same files), ownership ambiguity (who owns this module? who gets paged?), and 'big bang' deploys where 3 weeks of accumulated changes ship at once and something always breaks. Microservices solve this by giving each team complete ownership: they control their code, their deploy cadence, their technology choices, their data, and their SLOs. Team A ships a billing change without knowing or caring what Team B is doing with search. Failures are isolated: if the recommendation service crashes, the checkout flow keeps working (with a fallback like 'showing popular items' instead of personalized recommendations). Each service can scale independently: the search service needs 50 replicas while the settings service needs 2. The cost -- and it is enormous -- is that every internal function call is now a network call. Network calls fail (timeout, connection reset, DNS error). Network calls are slow (1–5ms per hop vs. ~0µs for a function call). Network calls require serialization/deserialization. Partial failures are now a fact of life (service A is up, service B is down, what does the user see?). You need circuit breakers, retries, timeouts, distributed tracing, service discovery, an API gateway, a deployment pipeline per service, contract testing, and a team culture mature enough to operate it all. This is why microservices are the architecture of 100+ engineer organizations, not 10-engineer startups.",
@@ -386,6 +482,34 @@
           "action": "Dedicated platform engineering team. Build an internal developer platform (Backstage as the portal). Self-service infrastructure provisioning (Terraform modules with guardrails). Standardized service template (new service comes with CI/CD, monitoring, alerting, health check, and runbook out of the box). Service catalog with mandatory ownership metadata. Cell-based deployment for blast-radius isolation."
         }
       ],
+      "interview": {
+        "prompt": "'How would you split this into services?' The interviewer wants to see where you draw boundaries and whether you know what each line costs.",
+        "senior": "Splits by domain (users, orders, payments, notifications), gives each its own database, puts an API gateway in front, and mentions a message bus for async communication.",
+        "staff": "Draws fewer boundaries than expected and justifies each with a reason that is organizational or operational, not aesthetic. Designs the interaction model deliberately: synchronous only for the request path that must be, async events for everything else, and a hard rule against call chains deeper than two or three hops. Addresses the data problem head on: no shared databases, sagas for cross-service workflows, an outbox pattern so events and writes are atomic, and reconciliation jobs because something will drift. Names what the platform must provide before the split is safe: tracing, a service catalog with owners, contract tests, standardized timeouts and retries. Mentions the ownership math: three services per team is sustainable, ten is an orphanage.",
+        "probes": [
+          "Placing an order touches inventory, payment, and shipping. Show me the failure handling when payment succeeds and shipping fails.",
+          "How do you prevent a 7-hop synchronous call chain from forming over time?",
+          "How many services per team is too many, and what happens past that point?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "List the five ownership rules a real microservice follows.",
+          "a": "Owns its data store (no shared database), runs in its own process and failure domain, is deployable independently, communicates only through versioned contracts (API or events), and has exactly one owning team."
+        },
+        {
+          "q": "What is the outbox pattern and what problem does it solve?",
+          "a": "A service writes its business row and an event row in the same local transaction; a relay then publishes events from the outbox table. It solves the dual-write problem where the database commit succeeds but the event publish fails, leaving other services unaware of a change."
+        },
+        {
+          "q": "Why are deep synchronous call chains dangerous?",
+          "a": "Latency adds up (each hop plus its tail), availability multiplies down (five 99.9 percent hops give 99.5), and a slow leaf service can exhaust thread pools all the way up the chain, turning one degraded service into a full outage. Cap depth, add timeouts and circuit breakers, and convert non-critical hops to async."
+        },
+        {
+          "q": "What must be in place before extracting services is safe?",
+          "a": "Distributed tracing with context propagation, a service catalog with named owners, contract tests between producers and consumers, standardized client libraries with timeouts and retries, and a deploy pipeline per service. Without these, you have built a debugging problem, not an architecture."
+        }
+      ],
       "children": []
     },
     {
@@ -398,6 +522,9 @@
         "hyper"
       ],
       "short": "Platform engineering + cell architecture -- infrastructure as an internal product",
+      "tldr": "At hundreds of engineers, infrastructure becomes an internal product: a platform team offers compute, data, deploy, and observability primitives as self-service, and the system is partitioned into cells so failures and capacity are bounded. The platform must have customers, SLOs, and a roadmap, or it becomes a gatekeeper.",
+      "keyInsight": "A cell architecture turns 'how big can this system get' into 'how many copies of a known-size system can we run'. Blast radius stops being a function of total scale and becomes a function of cell size, which you choose.",
+      "mentalModel": "A franchise. Each location (cell) is a complete, self-contained restaurant serving its own neighborhood with a known capacity. Headquarters (the platform team) supplies the kitchen design, the supply chain, and the training manual, but does not cook the meals. When one location has a kitchen fire, the others keep serving.",
       "detail": {
         "what": "At hyper scale, a dedicated platform engineering team provides infrastructure primitives as self-service internal products that product teams consume. The platform team builds and operates: (1) compute platform -- a 'run my code' primitive (Kubernetes clusters, serverless, or custom schedulers) where product teams deploy containers without thinking about machines; (2) data platform -- databases, caches, streams, and storage provisioned via API/UI/Terraform, with automatic backups, monitoring, and scaling; (3) deployment platform -- CI/CD pipelines, canary rollout, automatic rollback on SLO breach, feature flags, all as self-service; (4) observability platform -- metrics, logs, traces, dashboards, and alerting that come free with the service template; (5) security platform -- mTLS, secrets management, vulnerability scanning, compliance enforcement, all embedded in the platform so product teams get security by default. Cell architecture complements this: instead of one massive deployment, the system is divided into cells -- identical, independent full-stack copies, each serving N% of users (typically 1–10% per cell). A bad deploy, a rogue tenant, or a hardware failure in one cell affects only that cell's users, not the entire user base. Cells share nothing -- each has its own compute, databases, caches, and queues. The cell controller assigns users to cells and can migrate them between cells for rebalancing or failover. Think of it as 'microservices of the microservices' -- isolation at the infrastructure level, not just the code level.",
         "why": "At 500+ engineers and 200+ services, several problems become critical without a platform approach: (1) Reinvention waste -- every team builds its own CI/CD, monitoring, and deploy process. With 60 teams, that's 60 versions of the same infrastructure, each with different quality, different bugs, and different operational characteristics. A platform team builds it once, well, and amortizes the cost across all teams. (2) Inconsistency risk -- Team A uses Datadog, Team B uses Prometheus, Team C wrote a custom solution. When there's an incident spanning all three, correlating data is impossible. The platform enforces consistency where it matters (observability format, deploy process, health check interface) while allowing freedom where it doesn't (language, framework, internal architecture). (3) Blast radius -- without cells, a bad deploy or a database corruption can affect 100% of users. With 50 cells, the maximum blast radius is 2% of users. AWS itself is built on cells -- that's why 'partial outages' are common (one cell is down, the rest are fine). (4) Developer velocity stalls -- when every team must become an infrastructure expert to ship a feature, innovation slows. The platform team's north star metric is 'time from idea to production': how fast can a product engineer go from writing code to having it running in production with full monitoring, alerting, and logging? Best-in-class platforms achieve this in under one day. At Google, a new service can be fully deployed in hours.",
@@ -478,6 +605,34 @@
         }
       },
       "levelUp": [],
+      "interview": {
+        "prompt": "'You are at 800 engineers and 400 services. Teams wait three weeks for infrastructure. What do you do?' This is a staff-level prompt by design.",
+        "senior": "Proposes a platform team to own Kubernetes, CI/CD, and observability, with self-service tooling and golden paths.",
+        "staff": "Frames the platform as a product with named customers, SLOs for its own services, and adoption as the success metric rather than mandate. Describes paved roads with escape hatches instead of gates. Introduces cells: partition tenants or users into fully independent stacks of bounded size, route at the edge, and make 'add a cell' the scaling operation, with tested cell migration and no cross-cell calls. Discusses the sociology: how to keep the platform team from building for hypothetical needs (embed with product teams, fund from demonstrated pain), how to prevent it from becoming a bottleneck (self-service first, humans second), and how to measure it (time to first deploy, infra request lead time, percentage of services on the golden path).",
+        "probes": [
+          "How do you size a cell, and what breaks if cells are too big or too small?",
+          "A customer outgrows their cell. Walk me through the migration.",
+          "How do you know whether the platform team is enabling or gatekeeping?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "What is a cell architecture and what does it bound?",
+          "a": "The system is deployed as many independent, identical stacks (cells), each serving a fixed slice of customers with no cross-cell dependencies. It bounds blast radius (one cell's failure affects only its customers), capacity planning (a cell has a known maximum), and testing (you can test one cell at full load)."
+        },
+        {
+          "q": "Why must cells have no cross-cell calls?",
+          "a": "Any cross-cell dependency reintroduces a shared failure domain and makes a cell's capacity depend on others. Cells in name only give you the operational cost of partitioning without the isolation benefit."
+        },
+        {
+          "q": "What are the signs a platform team has become a gatekeeper?",
+          "a": "Teams file tickets instead of using self-service, lead time for infra requests is measured in weeks, the platform has no SLOs for its own products, and product teams build shadow infrastructure to route around it. The fix is paved roads with escape hatches, adoption metrics, and treating product teams as customers."
+        },
+        {
+          "q": "Name two companies whose architecture is built on cells and what each gained.",
+          "a": "AWS uses cells as the fundamental unit so a bad deploy or a hot customer affects one cell, and new capacity means new cells. Salesforce runs pods: each pod serves a set of tenants end to end, so an incident is a pod incident, and pods can be moved between data centers as units."
+        }
+      ],
       "children": []
     }
   ]

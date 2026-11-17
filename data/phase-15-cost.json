@@ -11,6 +11,7 @@
     "hyper"
   ],
   "short": "Right-size → reserved → spot → FinOps team — because cloud bills compound faster than revenue if unmanaged",
+  "tldr": "Cloud cost compounds faster than revenue unless someone owns it. The ladder: tag everything, right-size, commit (reserved and savings plans) for the steady base, run spot for the interruptible, and build a FinOps practice once the bill is a board topic. Engineers must see the cost of the choices they make.",
   "keyInsight": "Cloud cost is an engineering metric, not a finance metric. The engineer who writes the code chooses the instance type, the storage class, the data transfer path, and the query pattern. If they don't see the bill, they can't optimize it. Make costs visible to the people who cause them.",
   "mentalModel": "Think of your cloud bill like a water bill in a building you manage. On-demand instances are like leaving every faucet running 24/7 'just in case someone needs water.' Reserved instances are a contract with the water company for a fixed monthly rate — cheaper per gallon but you're committed. Spot instances are like collecting rainwater — incredibly cheap but you can't count on it being there when you need it. Right-sizing is noticing that 30 of your 50 faucets haven't been used in a month and turning them off. A FinOps practice is hiring someone to walk the building daily, check every faucet, negotiate with the water company, and report which floors are wasting the most. The building is your cloud account. The faucets are your resources. The water bill is your cloud invoice. And like a water bill, the biggest savings come not from any single optimization but from a culture of awareness.",
   "detail": {
@@ -270,5 +271,33 @@
       ]
     }
   },
+  "interview": {
+    "prompt": "Cost appears as 'how much would this cost to run?' and as the staff-level follow-up 'where would you cut 30 percent without hurting users?'",
+    "senior": "Estimates instance, storage, and bandwidth costs, suggests reserved instances and autoscaling, and mentions tagging for attribution.",
+    "staff": "Produces a rough unit economics model (cost per request, per user, per gigabyte) and identifies the dominant line items, which are usually not compute: cross-AZ and egress transfer, logs and metrics ingestion, idle non-production environments, over-provisioned databases. Structures the fleet as a base of committed capacity plus autoscaled on-demand plus spot for batch, with a target utilization. Uses architecture as the cost lever: caching to cut database size, tiered storage with lifecycle rules, sampling observability data, ARM instances. Builds the feedback loop: cost dashboards per team and service, anomaly alerts, cost reviews in design docs. Evaluates repatriation honestly when the workload is steady and large, and names egress lock-in as the cloud's exit toll.",
+    "probes": [
+      "What is the most expensive line in this design that nobody will notice until the invoice?",
+      "Which workloads here can run on spot, and what happens when they are interrupted?",
+      "How do you make an engineer care about cost without turning them into an accountant?"
+    ]
+  },
+  "quiz": [
+    {
+      "q": "Why is cross-AZ and cross-region data transfer called the invisible line item?",
+      "a": "It is billed per gigabyte in both directions, is never in anyone's capacity plan, and grows with every replica, every chatty service pair across zones, and every log shipped across regions. At scale it can rival compute. Co-locate chatty services, compress, and keep replication traffic in mind."
+    },
+    {
+      "q": "How should on-demand, reserved, and spot capacity be mixed?",
+      "a": "Commit (reserved instances or savings plans) to the minimum load you are certain to run all year, autoscale on-demand for the variable part, and run interruptible batch and stateless workers on spot at 60 to 90 percent discounts with graceful interruption handling. Never commit to the peak."
+    },
+    {
+      "q": "What does 'no tagging strategy' cost?",
+      "a": "The inability to attribute spend to teams, services, or environments, which means nobody owns any line item, nobody can be asked to reduce it, and zombie resources live forever. Enforce tags at creation time through policy and reject untagged resources."
+    },
+    {
+      "q": "When does leaving the cloud make sense, and what is the hidden exit cost?",
+      "a": "When the workload is large, steady, and predictable (storage-heavy platforms like Dropbox), so owned hardware at high utilization beats on-demand pricing. The hidden cost is egress: moving petabytes out is billed per gigabyte, plus the engineering of operating hardware you no longer have in-house."
+    }
+  ],
   "children": []
 }

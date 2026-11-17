@@ -11,6 +11,9 @@
     "hyper"
   ],
   "short": "The invisible substrate — DNS, TLS, CDN, service mesh, and transport protocols that determine the floor of your latency and the ceiling of your reliability",
+  "tldr": "Networking is the substrate under every request: DNS, TLS, CDN, load balancers, service mesh, and transport protocols. It sets the latency floor (physics) and the reliability ceiling (what you cannot route around). A CDN is the highest-leverage, lowest-effort improvement most systems never fully exploit.",
+  "keyInsight": "The network is the one layer you cannot scale by adding machines. Speed of light, TCP handshakes, TLS round trips, and DNS resolution impose fixed costs per connection that you can only avoid by moving closer (edge), reusing connections (keep-alive, HTTP/2), or doing fewer of them.",
+  "mentalModel": "The road system of a city. You cannot make the roads shorter, but you can open local branches so customers drive less (CDN and edge), use highways with many lanes instead of one-lane streets (HTTP/2 multiplexing), avoid stopping at every toll booth (TLS session resumption and keep-alive), and keep the city map updated (DNS) so nobody drives to a demolished address.",
   "detail": {
     "what": "The networking layer is everything that moves bytes between users and your servers, and between your services internally. It encompasses five critical sublayers: (1) DNS — the global phone book that translates human-readable domain names (api.example.com) into IP addresses. DNS is the very first thing that happens when a user types your URL; if it's slow or broken, nothing else matters. (2) TLS — the encryption layer that secures data in transit. TLS 1.3 (the current standard) completes a handshake in one round-trip (vs two for TLS 1.2), saving 50–100ms on every new connection. Without TLS, anyone on the network path — ISPs, coffee shop WiFi operators, government surveillance — can read and modify your traffic. (3) CDN (Content Delivery Network) — a global network of edge servers that cache your content close to users. When a user in Mumbai requests your JavaScript bundle, the CDN serves it from a server in Mumbai (~5ms) instead of from your origin in Virginia (~250ms). CDNs are the single most cost-effective latency optimization in existence. (4) Service mesh — a dedicated infrastructure layer for service-to-service communication that handles mTLS encryption, load balancing, circuit breaking, retries, and observability without any changes to application code. Think of it as a 'networking sidecar' attached to every service that handles all the cross-cutting concerns. (5) Transport protocols — HTTP/1.1 (text-based, one request per TCP connection at a time), HTTP/2 (binary, multiplexed — many requests share one connection), HTTP/3 (QUIC over UDP — eliminates TCP head-of-line blocking, dramatically better on lossy mobile networks). Each protocol generation recovers 10–30% of wasted latency from its predecessor. The networking layer is invisible when it works and catastrophic when it fails. It's the substrate every other component sits on — your perfectly tuned database and elegantly designed API are irrelevant if the network between user and server is slow, unreliable, or insecure.",
     "why": "Network is simultaneously the last mile of latency (the irreducible minimum time for bits to travel between user and server) and the first mile of unreliability (the component most likely to experience intermittent failures, packet loss, and variable performance). A perfectly optimized backend served from us-east-1 still adds 150ms for a user in Singapore — the speed of light in fiber is approximately 5ms per 1,000km, and Virginia to Singapore is ~15,000km. No amount of code optimization, database tuning, or caching can overcome physics. CDN closes that gap by caching content at Points of Presence (PoPs) near users — Cloudflare has 300+ PoPs, CloudFront has 400+, serving cached content in 5–30ms from almost any city on Earth. Service mesh makes internal service-to-service calls observable (distributed tracing for every internal request), secure (mTLS so a compromised service can't sniff others' traffic), and resilient (automatic retries, circuit breaking, load balancing) — all without per-service code changes. HTTP/3/QUIC reclaims latency on flaky mobile networks: on a connection with 2% packet loss (common on mobile), HTTP/2 over TCP degrades severely because a single lost packet blocks ALL multiplexed streams (head-of-line blocking). HTTP/3 over QUIC (UDP) isolates streams so only the affected stream waits. Google measured 8% faster page loads on mobile just from switching to QUIC. Underinvest in networking and your fast application feels slow to users — they blame your product, not the network. Overinvest and you maintain complex infrastructure (BGP routing, custom PoP networks) you don't need. The right investment level depends on where your users are, how latency-sensitive your product is, and how large your engineering team is.",
@@ -177,5 +180,33 @@
       "congestion control algorithm"
     ]
   },
+  "interview": {
+    "prompt": "Networking rarely gets its own question; it shows up as 'why is p99 so high?' and 'how do users in Asia get fast responses?'",
+    "senior": "Adds a CDN for static assets, uses HTTPS everywhere, mentions DNS-based geo routing and HTTP/2.",
+    "staff": "Accounts for the round trips in a cold request (DNS, TCP, TLS, then HTTP) and removes them: connection reuse, TLS 1.3 and session resumption, HTTP/2 or HTTP/3, DNS prefetch, and terminating TLS at the nearest edge. Uses the CDN for more than static files: caches API responses with short TTLs, runs edge logic for auth and routing, absorbs DDoS. Treats mutual TLS inside the network as a given at scale and uses a service mesh to get it, plus retries and circuit breaking, without touching application code, while acknowledging the mesh's latency and operational cost. Knows the failure modes nobody expects: ephemeral port exhaustion, conntrack table limits, DNS TTL caching, BGP misconfiguration taking a company offline. Reasons about anycast for global failover and QUIC for lossy mobile networks.",
+    "probes": [
+      "Walk me through every round trip in a first request from a new mobile client, and how to cut each one.",
+      "What is in your CDN besides images?",
+      "What did Facebook's 2021 outage teach about networking as a failure domain?"
+    ]
+  },
+  "quiz": [
+    {
+      "q": "List the round trips before the first byte of an HTTPS response on a cold connection, and three ways to reduce them.",
+      "a": "DNS lookup, TCP handshake, TLS handshake (one round trip in TLS 1.3, two in 1.2), then the HTTP request. Reduce with connection keep-alive and HTTP/2 multiplexing, TLS session resumption or 0-RTT, HTTP/3 over QUIC which merges transport and TLS handshakes, and edge termination so the round trips are short."
+    },
+    {
+      "q": "What can a CDN do beyond serving static assets?",
+      "a": "Cache dynamic API responses with short TTLs, terminate TLS near the user, run edge functions for auth, redirects, and personalization, absorb DDoS traffic, and provide anycast routing to the nearest healthy origin region."
+    },
+    {
+      "q": "Why is 'TLS only at the load balancer, plaintext inside' a problem?",
+      "a": "Anyone inside the network (a compromised pod, a misconfigured peering, an insider) can read and modify traffic. Zero-trust networking assumes the perimeter is porous and encrypts service-to-service traffic with mutual TLS, typically via a service mesh."
+    },
+    {
+      "q": "What is ephemeral port exhaustion and how do you avoid it?",
+      "a": "Each outbound connection from a host uses a local port from a limited range (about 28K by default), and closed connections linger in TIME_WAIT. A service opening a new connection per request to a downstream can run out of ports in seconds under load. Fix with connection pooling and keep-alive, and tune the ephemeral range and TIME_WAIT reuse."
+    }
+  ],
   "children": []
 }

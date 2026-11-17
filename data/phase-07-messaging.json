@@ -11,6 +11,9 @@
     "hyper"
   ],
   "short": "Sync → job queue → message broker → event streaming — the architecture of decoupled, resilient systems",
+  "tldr": "Messaging moves work off the request path. A producer drops a message, a consumer handles it later, and neither needs the other to be up. The ladder: in-process jobs, a Redis-backed job queue, a message broker, event streaming. Every consumer must be idempotent because delivery is at-least-once.",
+  "keyInsight": "Asynchrony trades one hard problem (the caller waits) for three subtle ones (duplicates, reordering, and invisible failure). The queue is the easy part. Idempotent consumers, dead-letter handling, and observability across the gap are where messaging designs succeed or fail.",
+  "mentalModel": "A kitchen ticket rail. The waiter (producer) clips the order and walks away; the cook (consumer) pulls tickets when ready. The rail absorbs the lunch rush. But tickets can be clipped twice, a cook can drop one on the floor (dead letter), and the waiter no longer knows whether the dish was ever made unless someone tracks it.",
   "primer": "Imagine a restaurant. In a synchronous architecture, the waiter takes your order, walks to the kitchen, stands there watching the chef cook, waits for the plate, then walks back to you — one customer at a time. In an asynchronous architecture, the waiter writes the order on a ticket, clips it to a rail, and immediately goes to serve the next table. The kitchen picks tickets off the rail at its own pace. The ticket rail is a message queue. This tiny mental model explains everything about messaging: decoupling (the waiter doesn't need to know which chef cooks the meal), load leveling (the rail absorbs a rush of orders without the kitchen falling behind), retry (if a chef drops a plate, the ticket is still on the rail — cook it again), and independent scaling (add more chefs without changing anything about the waiters). Every concept in this phase is a refinement of that restaurant ticket rail.",
   "detail": {
     "what": "Messaging is infrastructure for asynchronous communication between components of your system. The core contract: a producer drops a message (a unit of work or an event) into a queue, topic, or stream, and a consumer picks it up later — milliseconds, seconds, or even hours later. Producer and consumer don't have to be online at the same time, don't need to know about each other's existence, and scale completely independently. This decoupling is the single most powerful tool for building resilient, scalable systems — and the single largest source of new complexity when introduced. The messaging landscape spans a wide spectrum: (1) Background job queues (Sidekiq, Celery, Bull/BullMQ): the simplest form — your application enqueues a job into a Redis-backed queue, and a worker process in the same codebase picks it up. The job and the app share the same code, the same deploy, and usually the same language. Think: 'send this email,' 'resize this image,' 'generate this PDF.' (2) Message queues (SQS, RabbitMQ, Azure Service Bus): dedicated infrastructure that sits between services. The producer and consumer are separate applications. Messages are delivered at-least-once, meaning the consumer may receive the same message twice (network ack lost, consumer crashed after processing but before acknowledging). The queue guarantees delivery but not exactly-once processing — that's your job. Think: 'process this payment,' 'update this inventory,' 'notify this user.' (3) Event streaming platforms (Kafka, Kinesis, Pulsar, Redpanda): a durable, ordered, replayable log. Unlike a queue where messages disappear after consumption, a stream retains events for a configurable period (hours to forever). Multiple independent consumer groups can each read the entire stream at their own pace. This enables event sourcing, auditing, stream processing, and the ability to 'replay history' — rebuild a search index from scratch by re-reading all events. Think: 'every trip event at Uber,' 'every click on LinkedIn,' 'every trade on a stock exchange.' The right choice depends on your coupling needs, throughput, ordering requirements, and whether you need replay. Most systems evolve through all three tiers as they grow.",
@@ -293,6 +296,34 @@
       ]
     }
   },
+  "interview": {
+    "prompt": "'Should this be synchronous or asynchronous?' and 'What if the consumer is down?' are the two questions every async design must survive.",
+    "senior": "Puts a queue between producer and consumer for decoupling, chooses Kafka for events or SQS for tasks, mentions retries and a dead-letter queue.",
+    "staff": "Decides sync versus async by whether the user needs the result to proceed, and keeps the request path minimal. Chooses the lightest tool for the actual need: background jobs for deferred work, a broker for routing and fan-out, a log like Kafka only when replay, ordering per key, or multiple independent consumers are required. Designs for at-least-once: idempotency keys on every consumer, dedup tables with TTL, exactly-once as a property of consumers not of the broker. Uses the outbox pattern so publishing is atomic with the database write. Handles poison messages with a dead-letter queue that is monitored and drained, not forgotten. Bounds retries with exponential backoff and jitter to prevent storms. Adds correlation ids and tracing across the hop so async does not mean invisible. Treats message schemas as API contracts with compatibility rules.",
+    "probes": [
+      "The consumer processes a payment event, then crashes before acknowledging. What happens on restart?",
+      "Why Kafka here rather than SQS? What specific capability do you need?",
+      "A message fails forever. Where does it go and who finds out?"
+    ]
+  },
+  "quiz": [
+    {
+      "q": "Why is at-least-once delivery the norm, and what does it require of consumers?",
+      "a": "Networks and crashes make it impossible for a broker to know whether a consumer finished processing before acknowledging, so brokers redeliver on doubt. Consumers must therefore be idempotent: processing the same message twice must produce the same result as once, typically via an idempotency key and a dedup record."
+    },
+    {
+      "q": "What is the outbox pattern?",
+      "a": "Write the business change and the event to publish in the same database transaction (the event goes into an outbox table), then a separate process publishes outbox rows to the broker. It eliminates the dual-write race where the database commits but the publish fails or vice versa."
+    },
+    {
+      "q": "When do you need Kafka rather than a task queue?",
+      "a": "When you need ordering per key, replay of history, retention for days, or several independent consumer groups reading the same stream. If you have one consumer doing one job with no replay, a task queue is simpler, cheaper, and easier to operate."
+    },
+    {
+      "q": "What is a retry storm and how do you prevent one?",
+      "a": "Many failed messages retried immediately and in sync overwhelm the recovering downstream, which fails again, so retries multiply. Prevent with exponential backoff, jitter, a cap on attempts, a circuit breaker on the consumer, and a dead-letter queue for messages that exhaust retries."
+    }
+  ],
   "children": [
     {
       "name": "Async Pattern",
@@ -307,6 +338,9 @@
         "hyper"
       ],
       "short": "None → background jobs → MQ → event streaming — choose the lightest tool that meets your actual needs",
+      "tldr": "Three tiers of async: background jobs (Sidekiq, Celery) for deferred work inside one application, a message broker (RabbitMQ, SQS, SNS) for routing between services, and event streaming (Kafka, Pulsar) for ordered, replayable logs with many consumers. Choose the lightest tier that meets the real need.",
+      "keyInsight": "Most teams reach for Kafka when a job queue would do, and pay the operational cost of a distributed log for years to solve a problem that was 'send an email later'. The right tier is the simplest one whose guarantees you actually depend on.",
+      "mentalModel": "Three ways to pass a note. A sticky note on your own desk (background job): quick, private, lost if the desk is cleared. The office mail cart (broker): reaches other departments, each note delivered once to one recipient. The company newsletter archive (event stream): every issue kept in order, anyone can subscribe, newcomers can read back issues.",
       "primer": "The three async patterns form a maturity ladder, but 'maturity' doesn't mean 'better.' A Sidekiq background job is the right answer for 80% of async work, the same way a bicycle is the right vehicle for a trip to the corner store. Using Kafka for 'send a welcome email' is like taking a helicopter to the corner store — technically possible, expensive, and absurd. Match the tool to the job.",
       "detail": {
         "what": "The pattern by which work is deferred from the synchronous request path. Three tiers, each with distinct capabilities and costs: (1) Background jobs (Sidekiq, Celery, Bull/BullMQ, Delayed::Job): the simplest async pattern. Your application enqueues a job — a serialized function call with arguments — into a Redis-backed queue. A worker process (usually in the same codebase and deploy) picks it up and executes it. Jobs are transient: once processed, they're gone (no replay). Single consumer per job. Best for: work that lives in the same codebase, doesn't need cross-service communication, and doesn't need replay — sending emails, resizing images, generating PDFs, syncing external APIs. (2) Message queues (SQS, RabbitMQ, Azure Service Bus, GCP Pub/Sub): a dedicated service that sits between producer and consumer services. Messages are delivered at-least-once to a single consumer (or fan-out via exchanges/SNS). Messages disappear once acknowledged. The queue provides guaranteed delivery, dead-letter queues, and visibility timeouts — features that background jobs don't have natively. Best for: cross-service communication with reliable delivery — 'Checkout Service → Payment Service: process this payment,' 'Order Service → Warehouse Service: ship this order.' (3) Event streaming (Kafka, Kinesis, Pulsar, Redpanda): a durable, ordered, replayable log. Events persist for days, weeks, or forever. Multiple independent consumer groups each read the entire stream at their own pace. This is fundamentally different from a queue: events are not 'consumed' and destroyed — they're 'read' and retained. Best for: multi-consumer fan-out, event sourcing, audit trails, and building derived views (search index, analytics pipeline, recommendation engine) from a shared event stream.",
@@ -429,6 +463,34 @@
           "to": "hyper",
           "trigger": ">1M events/sec, or event sourcing is a business requirement (audit trail, temporal queries, full system rebuild from events), or you need global fan-out across multiple datacenters",
           "action": "Scale to a multi-cluster, multi-datacenter event streaming platform. Implementation: (1) Deploy Kafka clusters per domain: 'payments-kafka' (3 brokers), 'user-events-kafka' (5 brokers), 'analytics-kafka' (10 brokers). Separate clusters contain blast radius — an operational issue in the analytics cluster doesn't affect payment processing. (2) Set up MirrorMaker 2 (open-source) or Confluent Cluster Linking for cross-datacenter replication of critical topics. Active-active: both DCs produce to local cluster, MM2 replicates bidirectionally. Use a prefixed topic naming convention (dc1.order-events, dc2.order-events) and a consumer that reads from both. (3) Implement stream processing with Apache Flink: deploy a Flink cluster (Kubernetes-based via Flink Operator), write stateful processing jobs in Java/Python, use event-time windows for accurate aggregations (handles late-arriving events). Enable checkpointing every 30 seconds for fault tolerance. (4) Build an internal event platform portal: teams self-service topic creation through a UI that enforces naming conventions, minimum partition count, replication factor, schema registration, and PII classification. (5) Establish an event catalog: every event type has an owner team, a human-readable description, a registered schema, a list of known producers and consumers, and SLO targets for production latency and consumer lag. This prevents the 'nobody knows what topic X does' problem. (6) Introduce retention policies per topic classification: 'operational' = 7 days, 'event-sourced' = forever (compacted), 'telemetry' = 24 hours. Monitor storage growth and set alerts for clusters approaching 80% disk."
+        }
+      ],
+      "interview": {
+        "prompt": "'How would you handle sending the confirmation email?' Candidates who say Kafka have told the interviewer something.",
+        "senior": "Uses a background job queue for emails and notifications, a message broker when services need to communicate, and Kafka for event streams.",
+        "staff": "Matches the tier to specific guarantees: a job queue when the producer owns the consumer and loss on Redis restart is acceptable or mitigated; a broker when routing, fan-out, and per-message acknowledgment across teams matter; a log when ordering per key, replay, and multiple consumer groups are required. Explains how to avoid queue starvation (separate queues per latency class, bounded job duration, long work split into steps). Builds observability into the async path from day one: job ids, queue depth and age metrics, tracing that follows the message. Knows the operational profile of each tool (Sidekiq's Redis dependency, RabbitMQ's memory alarms, Kafka's partition count and consumer lag) and the migration path between tiers, which is usually a dual-publish period.",
+        "probes": [
+          "Redis restarts and in-flight jobs vanish. Which jobs in this system can you afford to lose?",
+          "Your queue has a 30-second PDF job and a 50ms notification job. What goes wrong and how do you structure the queues?",
+          "What would make you move from SQS to Kafka, concretely?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "What does a background job queue not guarantee that a broker does?",
+          "a": "Durability across restarts (Redis-backed queues can lose in-flight jobs), delivery to multiple independent consumers, and cross-service routing with acknowledgments. A job queue is a convenience for one application; a broker is a contract between systems."
+        },
+        {
+          "q": "What is queue starvation and how do you prevent it?",
+          "a": "Long-running jobs occupy all workers, so fast, urgent jobs wait behind them. Prevent with separate queues and worker pools per latency class, bounded job durations with timeouts, and splitting long work into chained short jobs."
+        },
+        {
+          "q": "Why does async make debugging harder, and what fixes it?",
+          "a": "The request that triggered work has already returned, so failures happen with no user waiting and no stack trace tying the job to the cause. Fix with correlation ids on every message, trace context propagated through the broker, job status records, and alerts on queue age rather than only depth."
+        },
+        {
+          "q": "What did Shopify's Sidekiq scale prove?",
+          "a": "A simple Redis-backed job queue can process billions of jobs per day when you shard Redis, separate queues by priority, keep jobs small and idempotent, and invest in observability. Simplicity scales further than most teams assume; complexity should be earned by a specific missing guarantee."
         }
       ],
       "children": []

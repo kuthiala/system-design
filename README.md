@@ -4,17 +4,18 @@ Interactive system design decision tree split into modular phase data files.
 
 ## Project Structure
 
-- `index.html` — app shell and script loading order
-- `styles.css` — UI styling
-- `app.js` — tree assembly and D3 rendering logic
-- `data/phase-*.js` — individual phase definitions
+- `index.html` — app shell (top nav, page view, map) and script loading order
+- `styles.css` — map/sidebar styling; `css/views.css` — Learn/Practice/Reference/Drill pages
+- `js/` — modules on `window.SD`: `store`, `format`, `data` (loads JSON), `examples`, `lesson`, `drill` (spaced repetition), `map` (D3 tree), `views*` (pages), `main` (boot + hash router)
+- `data/index.json` — manifest: phases, `curriculum.json`, `reference/*.json`, `practice/index.json`
+- `data/phase-*.json` — phase and lesson content (`tldr`, `keyInsight`, `mentalModel`, `interview`, `quiz`, ...)
+- `app.js` — legacy single-file app, no longer loaded
+
+Routes: `#/learn`, `#/lesson/:id`, `#/map[/:id]`, `#/practice[/:id]`, `#/reference/(numbers|playbook|blocks)`, `#/drill`.
 
 ## Run Locally
 
-### Option 1: Open directly
-Open `index.html` in a browser.
-
-### Option 2: Run a local static server (recommended)
+Data is loaded with `fetch()`, so the app must be served over HTTP (opening `index.html` from `file://` will not work).
 From the project root:
 
 ```bash

@@ -11,6 +11,9 @@
     "hyper"
   ],
   "short": "Key design · shard count · replication model · routing — the art of splitting data without splitting your sanity",
+  "tldr": "Replication copies the same data to many nodes for durability and read scale. Sharding splits data so each node holds a different subset, for write scale and dataset size. Replication first, sharding last, and when you shard, the key you choose will outlive every engineer who chose it.",
+  "keyInsight": "Sharding does not make a database faster; it makes it wider. Every query that cannot be answered by one shard becomes a scatter-gather across all of them, slower and less reliable than before. The quality of a sharding scheme is measured by the fraction of queries that touch exactly one shard.",
+  "mentalModel": "Replication is photocopying the phone book so more people can read it at once. Sharding is tearing it into A to M and N to Z so two people can edit at once. Photocopies help readers, never writers. Torn halves help writers, but 'find everyone named Smith in both halves' now takes two lookups and a merge.",
   "detail": {
     "what": "Sharding and replication are two related but distinct strategies for distributing data across multiple machines, and understanding the difference is critical. Sharding (also called horizontal partitioning) means splitting your dataset so each machine holds a different subset of the data — think of it like dividing a phone book into A–M and N–Z across two shelves. Each shelf (shard) is responsible for a portion of the total data, and you need a routing mechanism to know which shelf to check for a given name. Replication means copying the same data to multiple machines so that if one machine dies, the others still have the data — like keeping three identical copies of the entire phone book in three different buildings. Together, sharding gives you horizontal scale (more total data and throughput than one machine can handle), and replication gives you durability and availability (data survives hardware failures). In practice, every production distributed database uses both: data is sharded across N groups, and each group is replicated R times. For example, a 3-shard, 3-replica setup has 9 total data copies (3 shards × 3 replicas each), where each shard holds ~33% of the data and each replica of that shard has the same ~33% for redundancy. These two mechanisms are the core of every distributed database — Cassandra, DynamoDB, CockroachDB, Vitess, MongoDB — and they're also the source of most of their complexity. When someone says 'distributed database,' they really mean 'sharded and replicated database with all the trade-offs that entails.'",
     "why": "You shard because vertical scaling has a ceiling — the biggest machine money can buy (e.g., AWS's db.r6g.16xlarge with 64 vCPUs and 512GB RAM at ~$8,000/month) can only hold so much data and serve so many queries per second. When your PostgreSQL instance is maxed at 50K writes/sec on that hardware and you need 200K, no amount of money buys a bigger single machine. Sharding splits the load: 4 shards each handling 50K writes/sec gives you 200K total. You replicate because every hard drive eventually fails (annual failure rate ~2–5% for enterprise SSDs), every machine eventually crashes, and every AZ eventually has an outage. Without replicas, a single disk failure means downtime until you restore from backup (hours) and potential data loss (everything since the last backup). With 3 replicas, you survive 2 simultaneous failures with zero data loss and zero downtime — the remaining replica promotes to primary within seconds. The costs are real and substantial: sharding eliminates efficient cross-shard joins (a query that touches all shards is called a scatter-gather and is N× slower), complicates transactions (a transaction spanning two shards requires two-phase commit or saga patterns), and demands careful key design (a bad shard key creates hot spots that defeat the purpose of sharding). Replication introduces consistency questions (which copy is authoritative after a failure? What about writes that reached one replica but not another?), replication lag (replicas may be seconds behind the primary, causing stale reads), and operational overhead (monitoring lag, managing failover, handling split-brain). Get either wrong and you'll have hot spots (one shard receiving 80% of traffic), data loss (replica promoted before receiving latest writes), or both. This is why the universal advice is: don't shard until you've exhausted vertical scaling and read replicas. Vertical scaling is 3–5× cheaper in operational effort than horizontal scaling. Every tier of complexity you add should be forced by necessity, not anticipated by fear.",
@@ -97,6 +100,34 @@
     "Am I monitoring replication lag with alerts when it exceeds my staleness budget?"
   ],
   "levelUp": [],
+  "interview": {
+    "prompt": "'The database cannot keep up. How do you scale it?' Reaching for sharding first is the junior move.",
+    "senior": "Adds read replicas for reads, then shards by user id for writes, with a routing layer and a plan for rebalancing.",
+    "staff": "Exhausts the cheaper options in order and names the number at which each stops working: vertical scaling, indexes and query fixes, a pooler, caching, read replicas, archiving cold data, splitting a hot table into its own instance (functional partitioning). Only then shards, and when sharding, picks the key from the dominant query pattern so most queries stay on one shard, explains what cross-shard operations are lost (joins, transactions, unique constraints) and how they are replaced (denormalization, sagas, global id service). Chooses the replication model per consistency requirement and is explicit about failover: who promotes, how split-brain is prevented, and what happens to in-flight writes. Plans resharding from day one with logical shards mapped to physical nodes.",
+    "probes": [
+      "What is the last thing you would try before sharding, and why?",
+      "You sharded by user id. Now product needs 'all orders for merchant X'. What do you do?",
+      "Walk me through a primary failover. Where can data be lost, and where can two primaries appear?"
+    ]
+  },
+  "quiz": [
+    {
+      "q": "Explain the difference between replication and sharding in one sentence each, and which problem each solves.",
+      "a": "Replication copies all data to multiple nodes, solving durability and read scale. Sharding splits data so each node holds a subset, solving write scale and dataset size. Replication cannot help writes; sharding cannot help durability."
+    },
+    {
+      "q": "What is the ordered list of things to try before sharding?",
+      "a": "Fix queries and indexes, add a connection pooler, add a cache, add read replicas, scale vertically, archive or tier cold data, and split hot tables into their own instance (functional partitioning). Each buys months to years and none has sharding's permanent complexity."
+    },
+    {
+      "q": "What do you lose when you shard a relational database?",
+      "a": "Cross-shard joins, cross-shard transactions, global unique constraints, and simple auto-increment ids. You replace them with denormalized data on each shard, sagas or compensations, and a global id generator (Snowflake-style), and every query must carry the shard key."
+    },
+    {
+      "q": "Why plan resharding from day one, and how?",
+      "a": "The first shard count is always wrong. Use many logical shards (say 1,024) mapped to a few physical nodes so growing the fleet means moving logical shards, not rehashing every key. Resharding without this is a multi-month migration of live data."
+    }
+  ],
   "children": [
     {
       "name": "Shard Key Design",
@@ -109,6 +140,9 @@
         "hyper"
       ],
       "short": "The single most important decision in horizontal sharding — choose wrong and you'll pay for years",
+      "tldr": "The shard key maps every record to a shard, and it is the most consequential choice in horizontal scaling. Pick a key that keeps the dominant queries on one shard and spreads writes evenly. Hash for uniformity, range for scans, composite when you need both. Monotonic keys create hot spots.",
+      "keyInsight": "The perfect shard key is the one that appears in the WHERE clause of your most frequent query and has high, evenly distributed cardinality. If no such key exists, your data model, not your database, is the problem to fix first.",
+      "mentalModel": "Mailboxes in a post office sorted by a rule. Sort by last name and the Smiths overflow one box (skew). Sort by the time the letter arrived and every new letter goes to today's box while the rest sit idle (monotonic hot spot). Sort by a hash of the address and the boxes fill evenly, but 'all letters for Main Street' now means checking every box.",
       "detail": {
         "what": "The shard key is a function — hash, range, or composite — that maps every record to a specific shard. It's the routing address for your data: given a record, the shard key tells you which shard owns it. A hash-based key (e.g., hash(user_id) % shard_count) spreads data uniformly but eliminates range queries. A range-based key (e.g., timestamp ranges — shard 1 holds Jan–Mar, shard 2 holds Apr–Jun) preserves ordering for range scans but creates hot spots on the 'current' range. A composite key (e.g., (tenant_id, time_bucket)) combines elements to balance both distribution and query locality. The shard key determines three things: (1) how evenly data and traffic are distributed across shards (write spread), (2) how many shards a typical query must touch (query affinity), and (3) how painful resharding will be (key stability). Once data is written with a shard key in production, changing the key requires a full data migration — reading every record, recomputing its shard assignment, and writing it to the new location. For large datasets (hundreds of millions of rows), this takes weeks to months. This is why shard key selection deserves more design time than almost any other decision.",
         "why": "The shard key is the single most consequential decision in horizontal sharding because a bad key creates hot spots that completely negate the purpose of sharding. Imagine you have 16 shards and one receives 80% of all writes because your key has skewed distribution — you've added all the complexity of a distributed system (cross-shard queries, distributed transactions, routing, resharding) while getting only 20% of the theoretical benefit. The remaining 15 shards are mostly idle while one is melting. Conversely, a key that distributes writes perfectly but forces every read query to scatter-gather across all 16 shards turns every single-row lookup into a 16-way fan-out — adding latency proportional to the slowest shard (tail latency amplification). The ideal key balances two competing goals: spread writes evenly (each shard gets ~1/N of traffic) while keeping related reads on the same shard (most queries touch 1–2 shards, not all N). This is the core tension and the core puzzle of shard key design. The best keys achieve both via composite structure: one component provides cardinality for even distribution, another provides affinity for common query patterns.",
@@ -205,6 +239,34 @@
           "action": "Add geographic sub-sharding: modify your composite key to include a region or datacenter prefix so data is placed near the users who access it. Implementation: (1) Define region buckets (e.g., 'eu', 'us', 'apac') based on your user distribution. (2) Add sub_bucket = hash(user_id) % K as the third composite component, where K is weighted by the region's traffic share. Example: EU handles 40% of traffic → K=4 sub-shards per entity in EU, US handles 50% → K=5, APAC handles 10% → K=1. (3) Update your routing layer to resolve region from the request (GeoDNS or user metadata) and route to the correct regional shard group. (4) For cross-region reads (e.g., a US user viewing an EU user's profile), the router transparently sends the query to the EU shard group — the caller doesn't need to know. Fan-out cost is bounded to K shards per region per query. Technologies to implement: Vitess with region-aware VSchema, CockroachDB's locality-optimized tables (automatically places leaseholders near the users who access them most), or Cassandra with NetworkTopologyStrategy (ensures each rack/DC has the specified replica count)."
         }
       ],
+      "interview": {
+        "prompt": "'What would you shard on?' The follow-up is always about the query the key makes impossible.",
+        "senior": "Shards by user id or tenant id with a hash, explains hot spots from timestamps, and mentions consistent hashing.",
+        "staff": "Starts with the query log: lists the top queries by frequency and cost, then picks the key that makes the top ones single-shard. Discusses skew explicitly: one tenant that is 1,000x average needs its own shard or a composite key (tenant id plus bucket). Explains composite keys for time series (device id plus time bucket) that give even writes and bounded range scans. Addresses secondary access patterns with global secondary indexes, denormalized copies, or a separate query-serving store fed by CDC, and says which one is appropriate at which scale. Knows the DynamoDB hot partition failure mode and the fix (salting, write sharding). Names the moment to use geographic sharding and its cost.",
+        "probes": [
+          "One customer generates 40 percent of your writes. How does your key handle that?",
+          "Your key is a hash of user id. Show me how 'orders in the last hour across all users' is answered.",
+          "Why is a timestamp a bad shard key, and when is it a fine partition key?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "Why is a monotonically increasing key (auto-increment id, timestamp) a bad shard key?",
+          "a": "All new writes land on the shard that owns the current range, so one shard takes 100 percent of write load while the others idle. Hash the key, or use a composite key that prefixes a high-cardinality dimension."
+        },
+        {
+          "q": "What is the tradeoff between hash and range sharding?",
+          "a": "Hash sharding spreads writes uniformly but destroys locality, so range queries hit every shard. Range sharding keeps ranges together for efficient scans but risks hot spots on the active range and needs rebalancing as ranges grow unevenly."
+        },
+        {
+          "q": "How does Discord's composite key for messages work and why?",
+          "a": "Messages are keyed by channel id plus a time bucket (about 10 days). Writes for a busy channel spread across buckets over time, reads for recent messages hit one or two buckets, and no single partition grows unbounded. Composite keys give even distribution and query locality at once."
+        },
+        {
+          "q": "What do you do when a single tenant is 1,000x larger than average?",
+          "a": "Give that tenant a dedicated shard or a composite key (tenant id plus a sub-shard bucket) so their data spreads across several shards, and route their queries with scatter-gather across their buckets only. Treat whales as a first-class design case, not an exception."
+        }
+      ],
       "children": []
     },
     {
@@ -220,6 +282,9 @@
         "hyper"
       ],
       "short": "Single → replicas → Raft leader → leaderless quorum — how your data survives hardware failure",
+      "tldr": "Replication is how data survives hardware failure and how reads scale. The ladder runs from single node with backups, to async replicas with manual failover, to consensus-based leader election (Raft), to leaderless quorums. Each rung buys availability and costs write latency or operational complexity.",
+      "keyInsight": "Every replication model is a bet about the failure you fear most. Async replication fears slow writes and accepts data loss on failover. Sync replication fears data loss and accepts slow writes and reduced availability. Quorums split the difference and make consistency a per-query dial. Know which bet you have placed.",
+      "mentalModel": "Keeping copies of a will. One copy at home (single node) is fast to update and lost in a fire. Mailing copies to relatives (async replicas) is safe eventually but a relative may hold an old version when you die (lag). Requiring two relatives to sign before any change counts (quorum) means nothing is lost and nothing is ambiguous, but every change needs a meeting.",
       "detail": {
         "what": "Replication is how data is copied across multiple nodes for two purposes: durability (data survives hardware failure) and availability (the system keeps serving during node outages). There are four main models, each with increasing sophistication: (1) Single node + backups: one database instance, periodic snapshots (daily pg_dump or RDS automated snapshots). Recovery means restoring a backup — RPO is hours (data since last backup is lost), RTO is 30–60 minutes. (2) Asynchronous replication: primary node streams changes to one or more replicas in the background. Replicas are slightly behind (milliseconds to seconds typically). If the primary dies, a replica is promoted to primary — either manually (operator runs a command) or semi-automatically (health check detects failure, automation promotes). RPO = replication lag at crash time (seconds of data potentially lost). RTO = failover time (manual: minutes; automated: 30–60 seconds). (3) Raft/Paxos consensus: a distributed consensus protocol elects a leader for each data partition. All writes go through the leader, who replicates to a majority of followers before acknowledging the write. If the leader dies, the remaining nodes elect a new leader automatically within seconds. RPO = 0 (writes are replicated to majority before acknowledgement — no data loss). RTO = election timeout (typically 5–15 seconds). (4) Leaderless quorum (Dynamo-style): there's no designated leader. Any node can accept writes. Consistency is tuned via quorum parameters: with N replicas, write to W nodes and read from R nodes. If W+R > N, at least one node in the read set has the latest write — giving you strong consistency. If W+R ≤ N, you get eventual consistency but higher availability. RPO depends on W (W=ALL → RPO=0; W=1 → RPO = entire dataset on the failed node). Conflict resolution needed for concurrent writes to the same key.",
         "why": "Every hard drive fails eventually — enterprise SSDs have a ~2–5% annual failure rate, and servers have ~5–10% annual failure rate including all hardware components. In a 100-node cluster, you should expect 5–10 node failures per year. Without replication, each failure is an outage lasting 30–60 minutes (time to restore from backup) with potential data loss (everything since the last backup). With replication factor 3, you can lose 2 nodes simultaneously with zero data loss and zero downtime — the remaining replica(s) continue serving while failed nodes are replaced in the background. Each replication model trades off three things: (1) write latency — synchronous replication adds a network round-trip to every write (the primary waits for replica acknowledgement before telling the client 'success'); (2) failover speed — Raft auto-elects in seconds, manual promotion takes minutes; (3) consistency guarantees — leader-based systems offer strong consistency (all reads go through the leader), leaderless offers tunable consistency. Choosing the wrong model: too weak (single node for critical financial data) risks data loss that ends the business. Too strong (synchronous replication across continents for a view counter) wastes 80ms per write for data where loss of a few writes is irrelevant.",
@@ -349,6 +414,34 @@
           "action": "Transition to leaderless quorum or multi-region consensus. The two main paths: (A) Leaderless (Cassandra/DynamoDB): (1) Deploy Cassandra with NetworkTopologyStrategy, replication_factor=3 per datacenter. This gives you local strong consistency (LOCAL_QUORUM) with async cross-DC replication. (2) For each table, determine the right consistency level: financial data → LOCAL_QUORUM writes + LOCAL_QUORUM reads; user content → LOCAL_ONE writes + LOCAL_ONE reads; counters → use Cassandra's counter type (CRDT-based, merges automatically). (3) Implement read-repair and anti-entropy: Cassandra does this automatically, but tune gc_grace_seconds (the window during which tombstones are kept for consistency — default 10 days; too short → zombie data returns, too long → tombstone accumulation). (4) For conflict resolution beyond LWW: implement application-level merge logic or use CRDTs. Redis Enterprise supports CRDTs for counters and sets across geo-distributed clusters. Riak provides vector clocks for causal conflict detection. (B) Global strong consistency (Spanner/CockroachDB): (1) Google Spanner: create a multi-region instance (configuration presets like 'nam-eur-asia1' span 3 continents). Writes to the leader region are fast (~5ms); writes requiring cross-region consensus are ~100–200ms. Reads from any region can be strongly consistent (via 'stale reads' with bounded staleness) or exactly consistent (via read-write transactions). (2) CockroachDB: deploy nodes across regions, configure locality-optimized tables so each table's leaseholder (leader) is in the region closest to its primary users. Cross-region writes pay consensus latency, but most reads are local. (3) For both: implement per-table/per-feature consistency policies. Not everything needs global strong consistency — identify the 5% that does (financial, inventory) and use eventual for the rest."
         }
       ],
+      "interview": {
+        "prompt": "'What happens when the primary dies?' Most candidates say 'failover to a replica'. The interviewer wants the next five sentences.",
+        "senior": "Describes primary-replica with async replication, automated failover with a tool like Orchestrator or Patroni, and mentions replication lag and read-your-writes issues.",
+        "staff": "Specifies the model per data class: async replicas for most data with lag monitoring and alerting, semi-sync for anything where losing the last second of writes is unacceptable, consensus (Raft via Patroni or a Spanner-style store) where split-brain must be impossible. Walks through failover precisely: detection window, fencing the old primary (STONITH) so two primaries cannot accept writes, promotion, client reconfiguration via a proxy or DNS, and reconciling writes the old primary committed but never shipped. Explains quorum math (W plus R greater than N) and how tunable consistency lets a single table serve both strongly consistent and fast reads. Covers read-your-writes on replicas with session tracking. Names RPO and RTO as the requirements that drive all of it.",
+        "probes": [
+          "Failover takes 30 seconds and the primary was at 2 seconds of replication lag. What did you lose, and who notices?",
+          "How do you guarantee two nodes never both think they are primary?",
+          "With N=3, what W and R give strong reads, and what does it cost?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "What is split-brain and how is it prevented?",
+          "a": "Two nodes both believe they are the primary and accept conflicting writes, usually after a network partition where the old primary was not actually dead. Prevent it with fencing (the cluster revokes the old primary's ability to write, for example by killing it or revoking its lease) and consensus-based leader election that requires a majority."
+        },
+        {
+          "q": "Explain quorum reads and writes with N=3.",
+          "a": "Writes succeed after W replicas acknowledge; reads consult R replicas. If W plus R is greater than N, every read overlaps with the latest write and is strongly consistent. W=2, R=2 gives strong consistency with one node failure tolerated; W=1, R=1 gives the fastest operations and eventual consistency."
+        },
+        {
+          "q": "What are RPO and RTO and how do they map to replication choices?",
+          "a": "RPO (recovery point objective) is how much data you can lose; RTO (recovery time objective) is how long you can be down. RPO of zero demands synchronous or quorum replication. RTO of seconds demands automated failover with consensus. Backups alone give RPO of hours and RTO of hours."
+        },
+        {
+          "q": "Why does a read replica break read-your-writes, and how do you fix it?",
+          "a": "A user writes to the primary and immediately reads from a replica that has not applied the write, so their change appears to vanish. Fix by pinning that user's reads to the primary for a few seconds after a write, or by tracking the write's log position and reading only from replicas at or beyond it."
+        }
+      ],
       "children": []
     },
     {
@@ -363,6 +456,9 @@
         "hyper"
       ],
       "short": "How requests find the right shard — the nervous system of your distributed database",
+      "tldr": "Routing is how a query finds its shard: a proxy tier (mongos, Vitess vtgate), a smart client that holds the shard map (Redis Cluster), or a config service everyone consults. The routing layer must be stateless, redundant, and fast at learning about topology changes, or it becomes the bottleneck it was meant to remove.",
+      "keyInsight": "A routing layer hides sharding from applications, and that is exactly why it is dangerous: once it exists, every query flows through it, so its latency and availability become the floor of the whole system. Stale shard maps turn a routine resharding into silent misdirected writes.",
+      "mentalModel": "A hospital switchboard versus a printed directory. The switchboard (proxy) is easy for callers and can reroute instantly when a department moves, but every call waits on it. A printed directory (smart client) is zero-latency, but every caller must get the new edition when departments move, and someone always has the old one.",
       "detail": {
         "what": "The routing layer is the mechanism that takes an incoming query and determines which shard owns the relevant data, then sends the query to that shard and returns the result. Without it, every client application would need to understand the shard map (which key ranges live on which nodes) and update that understanding whenever you add, remove, or rebalance shards — an operational impossibility at scale. There are three common routing patterns: (1) Stateless proxy (e.g., MongoDB's mongos, Vitess's vtgate, ProxySQL): a pool of proxy servers sits between clients and shards. Each proxy holds a cached copy of the shard map (fetched from a metadata store like etcd or ZooKeeper). The client sends queries to the proxy, which parses the query, extracts the shard key, looks up the target shard, forwards the query, and returns the result. The proxy is stateless — any proxy can handle any request — so you run multiple behind a load balancer for redundancy. Overhead: 1–2ms per query (network hop + parsing). (2) Gossip protocol (e.g., Cassandra): every database node knows the complete topology. When a client connects to any node, that node can route the query to the correct owner — or, if the client happened to connect to the owner, serve it directly. Topology changes propagate via gossip (nodes periodically exchange topology information with random peers) and converge within ~1–3 seconds. No external metadata store needed. Overhead: 0ms if client connects to owner, 1–2ms if forwarded. (3) Smart client (e.g., Redis Cluster, Kafka client): the client library itself holds a local copy of the shard map and connects directly to the owner node — zero routing overhead. If the topology changes (a shard moved), the client discovers this when the node responds with a MOVED redirect, at which point the client updates its local map and retries. The client periodically refreshes the map in the background to stay current. Overhead: 0ms (direct connection). Complexity: client library is more sophisticated.",
         "why": "The routing layer is the traffic cop of your distributed database. Without it, clients would need to: (1) know which shard owns which key ranges, (2) maintain connections to all shards, (3) update their knowledge when shards are added, removed, or rebalanced, and (4) handle shard failures and failover. That's an enormous burden to push onto every application that talks to the database. The routing layer centralizes this complexity — applications talk to a simple endpoint, and the routing layer handles the rest. But the routing layer introduces its own concerns: it's an additional network hop (latency), an additional component that can fail (availability), and an additional system that must be kept up-to-date (consistency of the shard map). If the routing layer goes down, nothing can reach any shard — you've replaced one SPOF (the database) with another (the router). If the shard map is stale (the router thinks shard 5 owns a key that was moved to shard 12 during resharding), queries go to the wrong place. The routing layer must be at least as available and correct as the data layer it fronts.",
@@ -485,6 +581,34 @@
           "to": "hyper",
           "trigger": "Any routing latency is unacceptable (sub-millisecond SLO) OR topology change propagation must be near-instant",
           "action": "Commit fully to smart client routing with direct shard connections. Implementation: (1) Build or adopt a shard-aware client library for each language your services use. The library must: hold the full shard map in memory, compute target shard from key in <1μs (hash + lookup), maintain connection pools to all shard groups, handle MOVED redirects gracefully (update map + retry, no error to caller), refresh map in background every 15–30 seconds, and expose metrics (cache hit rate, redirect rate, connection pool utilization). (2) For topology changes (resharding, node addition), implement a push notification system: the shard map metadata store (etcd) emits a watch event, which a sidecar or library watcher receives and applies within milliseconds. The reactive MOVED redirect serves as a safety net for any changes the push missed. (3) At this scale, connection count becomes a concern: if you have 1000 application instances each connected to 500 shards, that's 500,000 connections. Use connection multiplexing (gRPC, HTTP/2) or connection pooling (each application instance maintains a small pool to each shard — 3–5 connections — and multiplexes requests). Monitor total connection count per shard and set hard limits."
+        }
+      ],
+      "interview": {
+        "prompt": "'How does a request know which shard to hit?' is the question that reveals whether the sharding design would actually run.",
+        "senior": "Describes a proxy that holds the shard map and forwards queries, or client-side hashing with consistent hashing to minimize movement on rebalancing.",
+        "staff": "Chooses between proxy and smart client by who the clients are (many languages and teams favor a proxy; a few high-performance services favor smart clients) and by latency budget. Makes the proxy tier horizontally scaled and stateless, with the shard map in a strongly consistent config store (etcd, ZooKeeper) and versioned so clients can detect staleness. Designs the resharding protocol: mark a logical shard as moving, dual-write or replicate, cut over with a map version bump, and have shards reject queries carrying a stale version so misdirected writes are impossible. Discusses consistent hashing with virtual nodes for balanced movement. Keeps routing logic out of application services entirely.",
+        "probes": [
+          "You move a shard to a new node. How does every client learn, and what happens to one that did not?",
+          "Where does the shard map live, and what consistency does it need?",
+          "The proxy adds 3ms per query. Is that acceptable, and how would you remove it?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "Compare proxy-based and client-side routing.",
+          "a": "A proxy centralizes the shard map, supports any client language, and reroutes instantly, but adds a network hop and is a tier to scale and keep highly available. Smart clients avoid the hop and the extra tier but must all learn topology changes, and a stale client misroutes until it refreshes."
+        },
+        {
+          "q": "How do you make a stale shard map harmless?",
+          "a": "Version the map. Clients send the map version with each query; a shard that has moved rejects queries with an old version and tells the client to refresh. Redis Cluster's MOVED redirection is this idea in practice."
+        },
+        {
+          "q": "What does consistent hashing buy you, and what are virtual nodes for?",
+          "a": "Adding or removing a node moves only about 1/N of the keys instead of rehashing everything. Virtual nodes (many points per physical node on the ring) smooth out the uneven ranges a plain ring produces and let a heavier node take more of the ring."
+        },
+        {
+          "q": "Why should routing logic never live in application services?",
+          "a": "Every service would need the shard map, every language would need a correct implementation, and every topology change would be a coordinated multi-service deploy. Centralize it in a proxy or a single shared client library with automatic refresh."
         }
       ],
       "children": []

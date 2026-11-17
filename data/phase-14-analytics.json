@@ -11,6 +11,7 @@
     "hyper"
   ],
   "short": "OLAP vs OLTP — the quiet separation that prevents your production database from dying under dashboard queries",
+  "tldr": "OLTP serves your application with small, indexed, row-level operations. OLAP answers questions over millions of rows with scans and aggregations. They need different engines, so copy data from the production database into a warehouse (via batch export or CDC) before an analyst's GROUP BY takes down checkout.",
   "keyInsight": "Your production database is a Formula 1 car optimized for single-row speed. Analytical queries ask it to haul freight. Those are different vehicles. Build a warehouse before your analyst's GROUP BY query brings down production during a board meeting.",
   "mentalModel": "Imagine your production database is a restaurant kitchen during dinner rush. Every request is a customer order — the kitchen is optimized to prepare individual meals quickly. An analytical query is like someone walking in and asking 'Can you count every meal you've made this year, broken down by ingredient, season, and customer age group?' The kitchen grinds to a halt while everyone stops cooking to answer the census question. The data warehouse is a separate research facility where that census can happen all day without affecting dinner service. OLTP is the kitchen; OLAP is the research lab. Separate them.",
   "detail": {
@@ -285,5 +286,33 @@
       ]
     }
   },
+  "interview": {
+    "prompt": "'The product team wants dashboards' or 'how do you compute daily active users?' is where you show you will not point Tableau at the primary.",
+    "senior": "Sets up a data warehouse (Snowflake, BigQuery), ETL or ELT from production, dbt for transforms, and a BI tool on top.",
+    "staff": "Separates the workloads physically from day one, even if the warehouse is just a read replica at first. Chooses the sync path by freshness need: nightly batch export for most reporting, CDC streaming (Debezium to Kafka to warehouse) when minutes matter, and a real-time analytics store (ClickHouse, Druid, Pinot) only for user-facing analytics at high query rates. Models the warehouse deliberately (events as immutable facts, dimensions slowly changing) and tests transforms so wrong numbers do not reach the board. Handles PII before it enters the warehouse: pseudonymize, restrict columns, and apply retention. Watches for schema drift and silent ETL failure with freshness and volume checks. Knows when a lake is premature and when the data team's size justifies a platform.",
+    "probes": [
+      "An analyst's query took the site down. What do you change today, this quarter, and next year?",
+      "Your dashboard must show orders per minute within 30 seconds of the order. Walk me through the pipeline.",
+      "A user exercises their right to erasure. Where in the analytics stack does their data live?"
+    ]
+  },
+  "quiz": [
+    {
+      "q": "Why do analytical queries hurt a transactional database so much?",
+      "a": "They scan millions of rows, evict the hot working set from the buffer cache, hold locks or snapshot resources for a long time, and saturate disk I/O. Every user-facing query then misses cache and queues behind the scan. Row stores are built for point lookups; column stores are built for scans."
+    },
+    {
+      "q": "What is CDC and when do you need it instead of nightly exports?",
+      "a": "Change data capture reads the database's replication log and streams every insert, update, and delete as events. Use it when freshness of minutes matters, when you need every change rather than a snapshot, or when nightly full exports have become too slow or too heavy on the source."
+    },
+    {
+      "q": "What tests should a dbt model have at minimum?",
+      "a": "Uniqueness and not-null on primary keys, referential integrity between fact and dimension tables, accepted values for enums, freshness checks on sources, and row count or sum reconciliations against the source. Untested transforms produce confident wrong numbers."
+    },
+    {
+      "q": "When is a real-time analytics store (ClickHouse, Druid, Pinot) justified over a warehouse?",
+      "a": "When analytical queries are user-facing with sub-second latency at high concurrency (a customer dashboard with thousands of users), or when events must be queryable seconds after they occur. For internal reporting with a few dozen analysts, a warehouse is simpler and cheaper."
+    }
+  ],
   "children": []
 }

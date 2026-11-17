@@ -1,0 +1,227 @@
+[
+  {
+    "id": "url-shortener",
+    "title": "URL shortener",
+    "difficulty": "warm-up",
+    "time": "30 min",
+    "prompt": "Design a service like bit.ly: users submit a long URL and get a short one; visiting the short URL redirects to the long one. Support custom aliases, expiry, and click analytics.",
+    "whyAsked": "It is small enough to finish and rich enough to expose how you estimate, choose a key scheme, cache a read-heavy path, and handle a write-heavy analytics side channel.",
+    "clarify": [
+      {"q": "How many new URLs per day and how many redirects?", "a": "Assume 10M new URLs per day and 100:1 read to write, so about 1B redirects per day."},
+      {"q": "How short must the key be, and can two users get the same short URL for the same long URL?", "a": "7 characters from a 62-character alphabet. Duplicates are fine; every submission gets its own key unless a custom alias is given."},
+      {"q": "Latency and availability for redirects?", "a": "Redirect p99 under 50 ms. Reads must be highly available; creation can tolerate brief degradation."},
+      {"q": "Retention?", "a": "Default 5 years, optional expiry; analytics kept 1 year."}
+    ],
+    "requirements": {
+      "functional": ["Create short URL (random or custom alias)", "Redirect short to long", "Optional expiry", "Click counts and basic analytics"],
+      "nonFunctional": ["Redirect p99 under 50 ms", "Redirect availability 99.99 percent", "Keys unpredictable", "Horizontally scalable writes"]
+    },
+    "estimation": [
+      {"label": "Write RPS", "work": "10M per day divided by 100K seconds is about 100 writes per second; 500 at peak."},
+      {"label": "Read RPS", "work": "1B per day is about 10K reads per second; 50K at peak. Redirects dominate everything."},
+      {"label": "Storage", "work": "10M per day times 365 times 5 years is about 18B records. At 500 bytes each that is about 9 TB. Sharded or a wide-column store eventually; a single Postgres for the first two years."},
+      {"label": "Key space", "work": "62 to the 7th is about 3.5 trillion, far more than 18B, so collisions are rare and a random 7-character key with a uniqueness check works."},
+      {"label": "Cache", "work": "20 percent of URLs take 80 percent of clicks: 20 percent of today's active set (say 200M hot keys at 500 bytes) is 100 GB, so a small Redis cluster."}
+    ],
+    "api": [
+      "POST /urls {longUrl, customAlias?, expiresAt?} returns {shortUrl}",
+      "GET /{key} returns 302 (or 301) redirect to longUrl",
+      "GET /urls/{key}/stats returns clicks by day, referrer, country"
+    ],
+    "dataModel": [
+      "urls: key (PK, 7 chars), long_url, owner_id, created_at, expires_at",
+      "clicks: aggregated per key per hour; raw events go to a stream, not the primary store"
+    ],
+    "highLevel": "Clients hit an API tier behind a load balancer. Creation writes to the primary store after generating a key. Redirects check Redis first, fall back to the store, then return a 302. Each redirect emits a click event to a queue; a consumer aggregates clicks into an analytics store. A CDN can even cache the redirect response for popular keys when 301 is acceptable.",
+    "diagram": "graph LR\n  C[Client] --> LB[Load balancer]\n  LB --> API[API tier]\n  API --> R[(Redis cache)]\n  API --> DB[(URL store)]\n  API --> Q[[Click events queue]]\n  Q --> AGG[Aggregator]\n  AGG --> AN[(Analytics store)]\n  KG[Key generator] --> API",
+    "deepDives": [
+      {"title": "Key generation", "body": "Three options. Hash the long URL (MD5, take 7 chars): deterministic, but collisions need handling and the same URL maps to the same key, which breaks per-user analytics. Random 7-character key with a uniqueness check on insert: simple, unpredictable, needs a retry on the rare collision. Pre-generated key service: a service that mints batches of unique keys into a table and hands them out, which removes the collision check from the write path and scales well; the staff answer for high write rates.", "tradeoff": "Base-62 encoding of an auto-increment id is the simplest but makes keys predictable (enumeration attack) and ties you to a single sequence."},
+      {"title": "301 versus 302", "body": "301 (permanent) lets browsers and CDNs cache the redirect, which removes load from you but means you never see the click again and cannot change the target. 302 (temporary) sends every click to your servers so analytics and expiry work. Most shorteners use 302 for analytics and accept the load; the cache absorbs it.", "tradeoff": "If analytics are not required, 301 plus CDN caching nearly eliminates the read path."},
+      {"title": "Scaling reads", "body": "Redirect reads are the whole game. Redis cache-aside with a TTL in days and request coalescing on miss keeps the database to a few hundred reads per second. Replicate the cache per region and put the API behind a global load balancer for latency. Negative-cache misses briefly so enumeration attacks do not hit the database.", "tradeoff": "Cache staleness on expiry: when a URL expires, delete it from cache in the same path, or accept redirects for up to the TTL."},
+      {"title": "Analytics side channel", "body": "Never increment a counter in the redirect path. Emit an event (key, timestamp, referrer, geo) to a queue and aggregate asynchronously into hourly buckets. At 50K events per second, Kafka with a stream processor; at 1K, a simple queue and a worker. Query the aggregated store for stats.", "tradeoff": "Analytics are eventually consistent by minutes, which is acceptable; exact counts would cost more than the feature is worth."}
+    ],
+    "failureModes": [
+      "Cache cluster restart sends 50K RPS at the database: size the database for a few minutes of full miss or warm the cache from a hot-key list.",
+      "Hot key (a viral link) concentrates on one Redis shard: replicate the hottest keys to every API node's local cache.",
+      "Key generator exhaustion or outage blocks creation: pre-mint keys in batches and keep a local buffer per API node."
+    ],
+    "staffSignals": [
+      "Spends time proportional to risk: the redirect path gets the depth, creation gets a sentence.",
+      "States the 301 versus 302 tradeoff as a product decision with a cost.",
+      "Keeps analytics off the hot path and says why exactness is not worth it.",
+      "Names the abuse cases (enumeration, malicious links) and a mitigation for each."
+    ],
+    "phases": ["req-traffic", "req-rw", "db-cache", "db-primary", "msg-pattern", "api"],
+    "quiz": [
+      {"q": "Why not use an auto-increment id encoded in base 62?", "a": "The keys become predictable, so anyone can enumerate every URL in the system, and the single sequence becomes a bottleneck and a sharding problem."},
+      {"q": "What does using a 301 redirect cost you?", "a": "Browsers and CDNs cache it, so you stop seeing clicks (no analytics), cannot expire or change the target, and lose control. It buys you a nearly free read path."},
+      {"q": "How do you keep the redirect path fast when a link goes viral?", "a": "Cache-aside in Redis with request coalescing, plus a tiny in-process cache on each API node for the hottest keys so one Redis shard is not the bottleneck."}
+    ]
+  },
+  {
+    "id": "rate-limiter",
+    "title": "Distributed rate limiter",
+    "difficulty": "warm-up",
+    "time": "30 min",
+    "prompt": "Design a rate limiter that enforces per-client limits (for example 1,000 requests per minute per API key) across a fleet of API servers in multiple regions, with minimal added latency.",
+    "whyAsked": "It is an algorithms question wearing a distributed systems coat: you must choose a counting algorithm, then make it correct and fast across many nodes, and finally make it a good citizen for clients.",
+    "clarify": [
+      {"q": "What is being limited and by which key?", "a": "Requests per API key and per user; some expensive endpoints have their own stricter limits. IP-based limits only as a fallback for unauthenticated traffic."},
+      {"q": "How exact must the limit be?", "a": "Approximate is fine for general limits (a few percent over is acceptable). A handful of operations (password reset, payouts) must be exact."},
+      {"q": "Where does it run?", "a": "At the API gateway in each of three regions; 100K RPS total; added latency budget under 1 ms."},
+      {"q": "What happens on rejection?", "a": "HTTP 429 with Retry-After and rate limit headers; clients are expected to back off."}
+    ],
+    "requirements": {
+      "functional": ["Per-key limits with configurable window and burst", "Different limits per endpoint class", "429 with Retry-After and remaining-quota headers", "Limits configurable without deploy"],
+      "nonFunctional": ["Added latency under 1 ms at p99", "Fail open (allow) if the limiter is unavailable, except for exact-limit operations which fail closed", "Approximate accuracy within a few percent for general limits"]
+    },
+    "estimation": [
+      {"label": "Checks per second", "work": "100K RPS means 100K limiter checks per second, 33K per region."},
+      {"label": "Keys", "work": "1M active API keys times a few endpoint classes: a few million counters, each a few bytes, so tens of MB in Redis."},
+      {"label": "Redis capacity", "work": "A single Redis node does 100K to 1M ops/sec; one per region with a replica is enough, but it is a single point and a latency hop."}
+    ],
+    "api": [
+      "Internal: allow(key, endpointClass) returns {allowed, remaining, resetAt}",
+      "Config: PUT /limits/{keyOrTier} {windowSeconds, limit, burst}"
+    ],
+    "dataModel": [
+      "Token bucket per (key, class): tokens, lastRefill; stored as a Redis hash or two integers",
+      "Limit config per tier cached in each gateway node with a short TTL"
+    ],
+    "highLevel": "The gateway evaluates the limit for each request. A local token bucket per key in each gateway node handles the fast path with no network call. Nodes periodically sync their consumption to a regional Redis so the global count stays approximately correct. Exact-limit operations go to Redis synchronously with an atomic Lua script. Configuration lives in a config service and is pulled by the gateways.",
+    "diagram": "graph LR\n  C[Client] --> GW[Gateway node]\n  GW --> LB[Local token bucket]\n  GW -. sync every 100ms .-> R[(Regional Redis)]\n  GW -- exact ops --> R\n  CFG[Config service] -.-> GW\n  GW --> SVC[Backend services]",
+    "deepDives": [
+      {"title": "Algorithm choice", "body": "Fixed window counters are trivial but allow 2x bursts at window edges. Sliding window log is exact but stores a timestamp per request. Sliding window counter (weighted blend of current and previous windows) is a cheap, accurate approximation. Token bucket needs two numbers per key, supports bursts naturally, and is the usual choice. Implement the Redis version as a Lua script so refill and consume are atomic.", "tradeoff": "Token bucket's burst allowance is a feature for well-behaved clients and a small loophole for abusers; size the bucket capacity accordingly."},
+      {"title": "Distributed counting", "body": "Synchronous Redis per request is exact and adds a round trip (0.3 to 0.5 ms same AZ, far more cross-region). Local buckets with periodic sync are fast and approximately correct: each node allows its share and reconciles every 100 ms, so overshoot is bounded by node count times sync interval. The staff answer is tiered: local approximate limits for the general case, synchronous exact checks for the few operations that need it, and regional Redis rather than global because cross-region latency breaks the budget.", "tradeoff": "Approximate limits can be gamed by spreading requests across regions; accept it for general limits, and route exact-limit operations to a home region."},
+      {"title": "Client contract", "body": "Return 429 with Retry-After, plus headers for limit, remaining, and reset so clients can self-pace. Document the limits. Apply jitter guidance in SDKs. Without Retry-After every rejected client retries immediately and the limiter becomes the DDoS.", "tradeoff": "Exposing exact remaining counts helps good clients and tells abusers exactly how hard to push; most providers accept that."},
+      {"title": "Failure behavior", "body": "If Redis is unreachable, general limits fail open (serve the request, log it) because an outage of the limiter should not become an outage of the API. Exact-limit operations fail closed. Add a circuit breaker on the Redis path so a slow Redis does not add latency to every request.", "tradeoff": "Fail open means an attacker who can take down Redis removes your limits; mitigate with local buckets that continue to enforce without Redis."}
+    ],
+    "failureModes": [
+      "A NAT gateway shares one IP across a corporate office, so IP-based limits block a whole company: key on identity, not IP, whenever authenticated.",
+      "A Lua script that is not atomic (separate GET and SET) over-admits under concurrency: use a single script or Redis atomic commands.",
+      "Config push sets a limit to zero by mistake and rejects everything: validate configs, roll out gradually, keep a kill switch to disable limiting."
+    ],
+    "staffSignals": [
+      "Separates policy (what to limit) from mechanism (how to count) and gets policy right first.",
+      "Proposes the tiered approximate-plus-exact design instead of one global exact counter.",
+      "Designs the client contract and the fail-open behavior as first-class requirements.",
+      "Uses rejection rate per customer as a product signal, not just a security one."
+    ],
+    "phases": ["api-rate", "api-gw", "db-cache", "reliability"],
+    "quiz": [
+      {"q": "Why does a fixed window counter allow double the intended rate?", "a": "A client can make the full limit in the last second of one window and the full limit in the first second of the next, so two windows' worth lands in two seconds."},
+      {"q": "How do you enforce a global limit without a Redis round trip per request?", "a": "Local token buckets on each node with periodic synchronization of consumption to a shared counter. Overshoot is bounded by node count times the sync interval, which is acceptable for general limits."},
+      {"q": "Should a rate limiter fail open or closed?", "a": "Open for general limits so a limiter outage does not become an API outage, closed for the few operations where exceeding the limit is dangerous (password resets, payouts)."}
+    ]
+  },
+  {
+    "id": "id-generator",
+    "title": "Unique id generator",
+    "difficulty": "warm-up",
+    "time": "25 min",
+    "prompt": "Design a service that generates unique 64-bit ids for a sharded system at millions of ids per second, where ids must be roughly sortable by creation time.",
+    "whyAsked": "It is a compact test of whether you understand why auto-increment breaks under sharding, how time and uniqueness interact across machines, and what clock skew does to ordering guarantees.",
+    "clarify": [
+      {"q": "Why 64 bits and why time-ordered?", "a": "64 bits fit a database bigint and index efficiently. Time ordering keeps B-tree inserts sequential and lets you paginate and sort by id."},
+      {"q": "How unique and how many per second?", "a": "Globally unique across all services and regions, never reused. Up to 10M ids per second across the fleet."},
+      {"q": "How precise does ordering need to be?", "a": "Roughly: ids generated a second apart must sort correctly; ids within the same millisecond may be in any order."},
+      {"q": "Must the generator be a service, or can it be a library?", "a": "Either; the question is the tradeoff."}
+    ],
+    "requirements": {
+      "functional": ["Generate a unique 64-bit id", "Ids increase with time at coarse granularity", "No coordination on the hot path"],
+      "nonFunctional": ["Latency in microseconds", "10M ids per second fleet-wide", "No single point of failure", "Survive clock skew without duplicates"]
+    },
+    "estimation": [
+      {"label": "Bit budget", "work": "1 sign bit, 41 bits of milliseconds (69 years), 10 bits of worker id (1,024 workers), 12 bits of sequence (4,096 per ms per worker). That is 4M ids per ms per worker, far beyond need."},
+      {"label": "Throughput per worker", "work": "4,096 per ms is 4M per second per worker. Ten workers cover 10M per second with headroom; a thousand are allowed."}
+    ],
+    "api": [
+      "Library call: nextId() returns int64",
+      "Service alternative: GET /ids?count=100 returns a batch"
+    ],
+    "dataModel": [
+      "No persistent state on the hot path. Worker id assignment stored in a coordination service (etcd, ZooKeeper) as a lease."
+    ],
+    "highLevel": "Each generator instance holds a unique worker id leased from a coordination service at startup. On each call it reads the clock in milliseconds, increments a per-millisecond sequence, and packs timestamp, worker id, and sequence into 64 bits. No network calls on the hot path. If the sequence overflows in a millisecond, it spins to the next millisecond. If the clock goes backwards, it refuses to generate until the clock catches up or fails over.",
+    "diagram": "graph LR\n  SVC[Any service] --> LIB[Id generator library]\n  LIB --> CLK[Monotonic clock]\n  LIB -. lease worker id at startup .-> CO[(Coordination service)]\n  LIB --> ID[64-bit id: time, worker, sequence]",
+    "deepDives": [
+      {"title": "Snowflake layout and alternatives", "body": "Twitter's Snowflake layout is the canonical one. UUIDv4 is 128 bits and random, which scatters B-tree inserts and doubles index size. UUIDv7 is time-ordered and 128 bits, a fine choice when 64 bits is not a hard requirement. Database ticket servers (Flickr) hand out ranges from a central sequence and add a dependency on the hot path. Pre-allocated ranges leased per node remove the dependency but lose fine time ordering.", "tradeoff": "Snowflake exposes the creation time and worker id in the id, which can be a minor information leak; UUIDv7 exposes time too."},
+      {"title": "Worker id assignment", "body": "Worker ids must be unique among live generators. Assign from a coordination service with a lease the generator renews; if it cannot renew, it stops generating. Alternatives: derive from a stable identity (pod ordinal in a StatefulSet) or from a small table where each node claims a row. Hard-coding is how duplicates happen after a copy-paste deploy.", "tradeoff": "Leases add a startup dependency; a generator cannot start if the coordination service is down. Acceptable because it is off the hot path."},
+      {"title": "Clock skew and monotonicity", "body": "NTP adjustments can move the wall clock backwards, which would produce duplicate or out-of-order ids. Use a monotonic clock for the sequence logic and detect backwards jumps; on detection, wait until the clock passes the last timestamp or shut the generator down. Across machines, skew of tens of milliseconds means ordering is only approximate at that granularity, which matches the requirement.", "tradeoff": "Waiting during a clock jump stalls id generation on that node; failover to other nodes keeps the fleet available."},
+      {"title": "Library versus service", "body": "A library gives microsecond latency and no network dependency but needs a worker id per process and consistent implementations across languages. A service centralizes the logic and worker id management but adds a round trip, so clients should fetch ids in batches. Most large systems use a library with batched fallbacks.", "tradeoff": "A service is easier to change and audit; a library is faster and more available."}
+    ],
+    "failureModes": [
+      "Two nodes get the same worker id after a misconfigured restart: duplicates. Lease-based assignment with fencing prevents it.",
+      "Clock steps backwards by 5 seconds after an NTP correction: the generator must detect and refuse, not produce duplicates.",
+      "Sequence exhaustion in a hot millisecond: spin to the next millisecond; monitor for sustained spinning as a capacity signal."
+    ],
+    "staffSignals": [
+      "States the bit budget and what each field's size implies about lifetime and fleet size.",
+      "Treats worker id assignment and clock skew as the real problems, not the bit packing.",
+      "Knows when UUIDv7 is the simpler answer and says so.",
+      "Mentions that ids leaking creation time can matter for some products."
+    ],
+    "phases": ["shard-key", "shard-route", "api"],
+    "quiz": [
+      {"q": "Why does auto-increment fail in a sharded database?", "a": "Each shard would generate overlapping ids unless coordinated, and coordinating a global sequence puts a single point in every write path."},
+      {"q": "What are the fields of a Snowflake id?", "a": "A timestamp in milliseconds (41 bits), a worker id (10 bits), and a per-millisecond sequence (12 bits), packed into 64 bits with a sign bit."},
+      {"q": "What happens if the system clock moves backwards?", "a": "Naively, duplicate or out-of-order ids. A correct generator detects the backward step and waits or stops until the clock passes the last issued timestamp."}
+    ]
+  },
+  {
+    "id": "kv-store",
+    "title": "Distributed key-value store",
+    "difficulty": "warm-up",
+    "time": "40 min",
+    "prompt": "Design a highly available key-value store like Dynamo or Cassandra: put(key, value) and get(key) over petabytes of data across hundreds of nodes, surviving node and datacenter failures.",
+    "whyAsked": "It is the purest test of replication, partitioning, consistency, and failure handling, and it is the substrate under half of the other questions.",
+    "clarify": [
+      {"q": "Consistency or availability during a partition?", "a": "Availability: writes must succeed if any replica is reachable. Consistency is tunable per request."},
+      {"q": "Value size and access pattern?", "a": "Values under 1 MB, mostly small. Point reads and writes only; no range scans or transactions."},
+      {"q": "Scale?", "a": "1 PB, 1M operations per second, 500 nodes across 3 datacenters."},
+      {"q": "Durability?", "a": "A write acknowledged must survive the loss of any one node, and ideally one datacenter."}
+    ],
+    "requirements": {
+      "functional": ["put(key, value)", "get(key) returns value or versions", "Tunable consistency per operation"],
+      "nonFunctional": ["Availability over consistency under partition", "p99 under 10 ms for reads", "Linear scalability by adding nodes", "No data loss on single node failure"]
+    },
+    "estimation": [
+      {"label": "Per-node data", "work": "1 PB times replication factor 3 is 3 PB, over 500 nodes is 6 TB per node: fits on SSDs with headroom."},
+      {"label": "Per-node ops", "work": "1M ops per second over 500 nodes is 2K per node, trivial; the design is capacity and availability bound, not throughput bound."},
+      {"label": "Key placement", "work": "Consistent hashing with 256 virtual nodes per physical node keeps imbalance under a few percent and makes rebalancing move only 1/N of keys."}
+    ],
+    "api": [
+      "put(key, value, consistency=ONE|QUORUM|ALL) returns version",
+      "get(key, consistency) returns value(s) with version(s)"
+    ],
+    "dataModel": [
+      "Each node: an LSM tree (memtable plus SSTables) with a write-ahead log, Bloom filters per SSTable, and periodic compaction",
+      "Versioning: vector clocks or last-writer-wins timestamps per key"
+    ],
+    "highLevel": "Keys are hashed onto a consistent hashing ring; each key is stored on N consecutive nodes (the preference list). Any node can coordinate a request: it forwards to the replicas, waits for W or R acknowledgments, and returns. Nodes gossip membership and failure state. Hinted handoff keeps writes flowing when a replica is down; read repair and anti-entropy (Merkle trees) fix divergence in the background. Each node stores data in an LSM tree.",
+    "diagram": "graph TB\n  C[Client] --> CO[Any node as coordinator]\n  CO --> R1[Replica 1]\n  CO --> R2[Replica 2]\n  CO --> R3[Replica 3]\n  R1 --- G((Gossip ring))\n  R2 --- G\n  R3 --- G\n  R1 --> LSM1[(LSM tree + WAL)]",
+    "deepDives": [
+      {"title": "Partitioning and rebalancing", "body": "Consistent hashing with virtual nodes spreads keys and bounds movement when nodes join or leave. Replicas are the next N distinct physical nodes on the ring, with rack and datacenter awareness so the three copies are not in one failure domain. Adding a node streams the ranges it takes over from current owners while they keep serving.", "tradeoff": "Virtual node count trades balance against metadata size and the cost of recovering a failed node from many peers."},
+      {"title": "Replication and tunable consistency", "body": "With N=3, W=2, R=2 you get overlapping reads and writes and tolerate one node failure per key. W=1, R=1 maximizes speed and availability at the cost of staleness. Sloppy quorums let writes land on nodes outside the preference list during failures (hinted handoff) and replay later. This is where the availability promise comes from.", "tradeoff": "Sloppy quorums mean W plus R greater than N no longer guarantees you read the latest value during a failure; be precise about which guarantee you are promising."},
+      {"title": "Conflict resolution", "body": "Concurrent writes to the same key on different replicas produce siblings. Last-writer-wins with timestamps is simple and loses data on clock skew. Vector clocks detect concurrency and return both versions for the client to merge (Dynamo's shopping cart). CRDT values merge automatically for sets and counters.", "tradeoff": "Vector clocks push merge logic to the client and grow with writer count; LWW is what most teams choose and most teams regret once."},
+      {"title": "Storage engine and failure detection", "body": "Each node uses an LSM tree: writes go to a WAL and memtable, flush to sorted SSTables, compact in the background; Bloom filters avoid disk reads for missing keys. Gossip spreads membership and suspicion; a node marked down triggers hinted handoff, and a node declared dead triggers re-replication of its ranges.", "tradeoff": "Compaction and re-replication compete with foreground traffic for I/O; throttle both and monitor pending compactions."}
+    ],
+    "failureModes": [
+      "A datacenter partition: each side continues accepting writes; on heal, anti-entropy reconciles and conflicts surface as siblings.",
+      "A hot key (one celebrity record) overwhelms three replicas: cache at the coordinator layer or spread with key suffixing.",
+      "Tombstone accumulation from heavy deletes slows reads until compaction: tune grace periods and compaction strategy."
+    ],
+    "staffSignals": [
+      "Explains exactly what consistency a given W and R gives, including the sloppy quorum caveat.",
+      "Picks a conflict strategy and says who merges and what the user sees.",
+      "Covers the operational half: rebalancing, compaction pressure, failure detection, re-replication.",
+      "Says what workloads this store is wrong for (range scans, transactions, joins)."
+    ],
+    "phases": ["shard-key", "shard-repl", "shard-route", "req-consist", "db-primary"],
+    "quiz": [
+      {"q": "With N=3, what W and R give you both strong reads and tolerance for one node failure?", "a": "W=2 and R=2: W plus R exceeds N so reads overlap the latest write, and any single node can be down."},
+      {"q": "What is hinted handoff?", "a": "When a replica is unreachable, the coordinator writes to another node with a hint of the intended owner; when the owner returns, the hint is replayed. It keeps writes available during failures."},
+      {"q": "Why do vector clocks beat last-writer-wins for conflicts?", "a": "They detect that two writes were concurrent instead of silently discarding one based on an unreliable clock, so no write is lost; the cost is that someone must merge the siblings."}
+    ]
+  }
+]

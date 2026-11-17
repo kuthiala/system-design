@@ -1,0 +1,248 @@
+[
+  {
+    "id": "payments",
+    "title": "Payment system",
+    "difficulty": "staff",
+    "time": "45 min",
+    "prompt": "Design the payment service for an e-commerce platform: charge customers via external processors, record a ledger, handle refunds and retries, reconcile with the processor daily, and never double-charge or lose money. 10K payments per minute at peak.",
+    "whyAsked": "Correctness beats scale here. It tests idempotency end to end, exactly-once semantics as a property of your design rather than a broker, ledgers, reconciliation, and how you reason about money when every component can fail.",
+    "clarify": [
+      {"q": "Which money flows?", "a": "Card and wallet payments through one or more processors (Stripe, Adyen), refunds, and payouts to merchants later. We do not store card numbers; the processor tokenizes."},
+      {"q": "Consistency?", "a": "Strong for the ledger and for any customer-visible balance. A payment's state must be unambiguous at all times."},
+      {"q": "Scale?", "a": "10K per minute at peak is under 200 per second; the system is correctness and audit bound, not throughput bound."},
+      {"q": "Compliance?", "a": "PCI scope minimized via tokenization; full audit trail; 7-year retention."}
+    ],
+    "requirements": {
+      "functional": ["Create a payment for an order", "Charge via processor with failover", "Refund fully or partially", "Immutable double-entry ledger", "Daily reconciliation with processor reports", "Webhook handling for async processor events"],
+      "nonFunctional": ["No double charge, ever", "No lost payment record", "p99 under 2 seconds for the synchronous path", "Complete audit trail", "Processor outage degrades gracefully"]
+    },
+    "estimation": [
+      {"label": "Throughput", "work": "170 payments per second at peak; a single Postgres primary with synchronous replication handles this with large headroom."},
+      {"label": "Ledger growth", "work": "Each payment creates about 4 ledger entries; 15M payments per day creates 60M rows per day, about 20 GB per day, 7 TB per year. Partition by month; archive to cold storage after 2 years with the ability to query."},
+      {"label": "Processor latency", "work": "Processor calls take 300 ms to 2 s; the synchronous budget must include one call plus a retry margin, so the design makes most retries asynchronous."}
+    ],
+    "api": [
+      "POST /payments {orderId, amount, currency, paymentMethodToken, idempotencyKey} returns {paymentId, status}",
+      "POST /payments/{id}/refunds {amount, idempotencyKey}",
+      "GET /payments/{id}",
+      "POST /webhooks/{processor} (signed, idempotent)"
+    ],
+    "dataModel": [
+      "payments: id, order_id, amount, currency, status (created, authorizing, authorized, captured, failed, refunded), processor, processor_ref, idempotency_key unique, version",
+      "ledger_entries: id, account_id, payment_id, debit/credit, amount, currency, created_at; append-only; every transaction balances",
+      "outbox: events to publish atomically with payment state changes",
+      "reconciliation: processor report rows matched to payments with status"
+    ],
+    "highLevel": "A payment request is deduplicated by idempotency key and persisted in state 'created' before any external call. The service calls the processor with its own idempotency key derived from the payment id, records the result, and writes ledger entries in the same transaction as the state change, with an outbox event. Uncertain outcomes (timeouts) move the payment to a pending state and a reconciler queries the processor to resolve it. Webhooks update state idempotently. A daily job reconciles the ledger against processor settlement reports and raises discrepancies.",
+    "diagram": "graph LR\n  O[Order service] --> PS[Payment service]\n  PS --> DB[(Payments + ledger + outbox)]\n  PS --> PR[Processor adapter]\n  PR --> P1[Processor A]\n  PR --> P2[Processor B]\n  P1 -. webhooks .-> WH[Webhook handler]\n  WH --> DB\n  DB --> REL[Outbox relay]\n  REL --> EV[[Payment events]]\n  REC[Reconciler] --> DB\n  REC --> P1",
+    "deepDives": [
+      {"title": "Idempotency end to end", "body": "Three layers. Client to service: an idempotency key per payment attempt, stored with the response; a retry returns the stored result. Service to processor: a processor idempotency key derived deterministically from the payment id, so a retried charge after a timeout cannot create a second charge. Processor to service: webhook events carry ids and are applied idempotently with a processed-events table. State transitions are guarded by a version check (optimistic locking) so two workers cannot both capture.", "tradeoff": "Idempotency records must be retained long enough to cover the longest plausible retry (days), and they must be scoped so a reused key with a different amount is rejected, not replayed."},
+      {"title": "The uncertain state", "body": "A processor call that times out leaves you not knowing whether the charge happened. Never retry blindly and never mark failed. Record the attempt as pending, then resolve by querying the processor with the idempotency key or by waiting for the webhook, with a reconciler that sweeps pendings older than N seconds. The customer sees 'processing' rather than a false failure that invites a second order.", "tradeoff": "Pending states complicate the UX and the order flow; they are the price of never double-charging."},
+      {"title": "Ledger design", "body": "Double-entry, append-only entries with a balancing invariant enforced per transaction: every payment writes debit and credit rows that sum to zero across accounts (customer receivable, processor clearing, revenue, fees). Balances are derived by summation, with periodic snapshots for speed. Corrections are new entries, never updates. The ledger lives in the same transaction as the payment state change so they cannot diverge.", "tradeoff": "Deriving balances by sum is slow at scale; snapshot and checkpoint, but keep the entries as the truth."},
+      {"title": "Reconciliation and processor failover", "body": "Daily settlement reports from the processor are matched against the ledger by processor reference: every charge, refund, fee, and chargeback. Unmatched rows become tickets with an owner. Reconciliation is the control that catches every bug the other layers miss. Processor failover routes new payments to a secondary when the primary's breaker opens; in-flight payments stay with their original processor because refunds and disputes must go back through it.", "tradeoff": "Multi-processor routing adds integration cost and splits volume discounts; most companies run one primary and keep the second warm."}
+    ],
+    "failureModes": [
+      "Database commit succeeds but event publish fails: the outbox pattern makes publish eventually consistent with state.",
+      "Processor returns success but the response is lost: the pending reconciler resolves it via the idempotency key; no second charge is possible.",
+      "A refund is requested twice: the refund idempotency key and a check that total refunds cannot exceed captured amount both block it.",
+      "Webhooks arrive out of order (captured before authorized): state machine accepts only valid transitions and parks out-of-order events for retry."
+    ],
+    "staffSignals": [
+      "Treats exactly-once as a property achieved through idempotency at every boundary, not a broker feature.",
+      "Designs the uncertain state explicitly instead of pretending timeouts are failures.",
+      "Insists on an append-only double-entry ledger in the same transaction as state.",
+      "Names reconciliation as the safety net and gives it an owner."
+    ],
+    "phases": ["req-consist", "api", "msg", "rel-cb", "comp-audit", "security", "db-primary"],
+    "quiz": [
+      {"q": "A charge call times out. What must the system never do, and what does it do instead?", "a": "Never retry without an idempotency key and never mark it failed. It records the attempt as pending and resolves it by querying the processor or awaiting the webhook, then transitions the state."},
+      {"q": "Why is the ledger append-only and double-entry?", "a": "Append-only gives an audit trail and makes corrections visible as new entries. Double-entry enforces that every transaction balances, so missing or duplicated money is detectable arithmetically."},
+      {"q": "What does daily reconciliation catch that the request path cannot?", "a": "Bugs and edge cases in every layer: lost webhooks, mismatched amounts, fees, chargebacks, and processor-side events the system never saw. It is the control of last resort."}
+    ]
+  },
+  {
+    "id": "ride-matching",
+    "title": "Ride matching and location",
+    "difficulty": "staff",
+    "time": "45 min",
+    "prompt": "Design the dispatch core of a ride-hailing app: drivers stream locations, riders request trips, the system matches each request to a nearby available driver within seconds, and tracks the trip. 1M active drivers, 100K requests per minute at peak in the largest city.",
+    "whyAsked": "It combines a write-heavy geospatial ingest with a latency-critical matching path and consistency constraints (one driver, one trip), and the data is naturally partitioned by geography, which invites both good and bad sharding answers.",
+    "clarify": [
+      {"q": "Location update rate?", "a": "Each active driver sends a location every 4 seconds; riders every 10 seconds during a trip."},
+      {"q": "Matching latency and quality?", "a": "A match within 5 seconds; prefer the driver with the shortest ETA, not straight-line distance; drivers can decline."},
+      {"q": "Consistency?", "a": "A driver can be assigned to at most one trip at a time; a rider to one request. Location data can be a few seconds stale."},
+      {"q": "Geography?", "a": "Many cities; each city's traffic is independent; multi-region deployment with each city homed in one region."}
+    ],
+    "requirements": {
+      "functional": ["Ingest driver locations", "Find nearby available drivers", "Match a request to a driver with offer and accept", "Track trip state and ETAs", "Surge and supply metrics per area"],
+      "nonFunctional": ["Location ingest 250K writes per second", "Match p99 under 5 seconds", "No double assignment", "City-level isolation so one city's incident does not affect others"]
+    },
+    "estimation": [
+      {"label": "Location writes", "work": "1M drivers every 4 seconds is 250K writes per second, plus riders in trips. This is a write-heavy, loss-tolerant, latest-value workload: an in-memory store, not a relational database."},
+      {"label": "Matching", "work": "100K requests per minute is about 1,700 per second at peak in the largest city, each requiring a nearby search over a few hundred candidates and an ETA calculation."},
+      {"label": "Memory", "work": "1M drivers times a few hundred bytes of latest location and state is a few hundred MB, trivially in memory, replicated per city partition."}
+    ],
+    "api": [
+      "POST /drivers/{id}/location {lat, lng, heading, ts} (high frequency, over a persistent connection)",
+      "POST /rides {riderId, pickup, dropoff} returns {rideId, status}",
+      "POST /rides/{id}/offer-response {driverId, accept}",
+      "GET /rides/{id} returns status, driver, ETA"
+    ],
+    "dataModel": [
+      "Driver state (in memory, per city shard): driver_id, cell, lat, lng, status (available, offered, on_trip), updated_at",
+      "Spatial index: geohash or S2 cell to set of available driver ids",
+      "rides (durable, Postgres per city shard): id, rider_id, driver_id, state, timestamps; state transitions with versioning",
+      "Location history: append-only stream to Kafka for analytics, ETA models, and disputes"
+    ],
+    "highLevel": "Drivers hold a persistent connection to a location gateway that writes the latest location into an in-memory geospatial index partitioned by city, and emits the raw stream to Kafka for history. A ride request goes to the dispatch service for that city, which queries the index for candidates in the pickup cell and neighbors, ranks them by ETA from a routing service, and offers the trip to the top driver with a short timeout, moving to the next on decline. Acceptance transitions the ride to assigned under a lock on the driver's state. Trip tracking updates the durable ride record and streams positions to the rider.",
+    "diagram": "graph LR\n  D[Driver app] --> LG[Location gateway]\n  LG --> GI[(In-memory geo index, per city)]\n  LG --> K[[Location stream]]\n  R[Rider app] --> DS[Dispatch service, per city]\n  DS --> GI\n  DS --> ETA[Routing / ETA service]\n  DS --> RDB[(Rides store)]\n  DS --> D\n  K --> AN[Analytics + surge]\n  AN --> DS",
+    "deepDives": [
+      {"title": "Geospatial index", "body": "Encode positions into cells (geohash length 6 is about 1 km, or S2 level 13). Keep a map from cell to available driver set, updated on every location write by moving the driver between cells. A nearby query reads the pickup cell and its 8 neighbors (expanding rings if too few), yielding a few hundred candidates in microseconds. Keep this in memory per city shard with a replica; durability is unnecessary because locations are refreshed every 4 seconds.", "tradeoff": "Cells at a boundary split true neighbors across cells, which the neighbor query handles; cell size trades candidate count against query spread. Dense cities need smaller cells than rural areas; use adaptive levels."},
+      {"title": "Matching and the single-assignment invariant", "body": "Rank candidates by ETA from a routing service (road distance and traffic), not straight-line distance. Offer to the best driver with a 10 to 15 second timeout; on decline or timeout, offer to the next. The invariant that a driver has at most one offer or trip is enforced by a compare-and-set on the driver's state in the index (available to offered) and a durable version check on the ride record. Batch matching (solving many requests against many drivers every second as an assignment problem) improves global efficiency at scale.", "tradeoff": "Sequential offers are simple and fair to drivers but slow when drivers decline; batch assignment is faster and better globally but more complex and needs careful fairness rules."},
+      {"title": "Partitioning by city and failure isolation", "body": "Each city is a shard: its own in-memory index, dispatch instances, and rides database, homed in the nearest region. Cross-city trips are rare and handled by the origin city. This gives natural horizontal scaling, blast radius containment (an incident in one city stays there), and data residency. Hot cities get more instances; the index for a mega-city may itself be split by district.", "tradeoff": "City boundaries are fuzzy at edges; assign by pickup location and allow a driver to be visible to adjacent shards near borders."},
+      {"title": "Location ingest path", "body": "250K writes per second of tiny, loss-tolerant updates: a persistent connection (WebSocket or gRPC stream) per driver to a gateway, batched writes into the in-memory index, and an async publish to Kafka. Drop updates older than the latest; coalesce bursts. The durable history stream feeds ETA model training, surge computation, and dispute resolution. A relational database in this path would be the first thing to fall over.", "tradeoff": "In-memory state is lost on a node failure; rebuild from the next 4-second update cycle, which means a few seconds of degraded matching for that shard."}
+    ],
+    "failureModes": [
+      "Routing service is slow: fall back to straight-line distance ranking with a flag, and record that matches were degraded.",
+      "A city shard's index node dies: the replica takes over; drivers resend within 4 seconds; matching pauses for seconds, not minutes.",
+      "Two dispatch workers race to assign the same driver: compare-and-set on driver state plus ride version check makes one fail and retry with the next candidate.",
+      "A mass event ends and 50K riders request at once in one cell: expanding-ring search and batch matching absorb it; surge signals pull supply."
+    ],
+    "staffSignals": [
+      "Separates the write-heavy, loss-tolerant location stream from the durable, consistent ride state and uses different stores for each.",
+      "Enforces the single-assignment invariant with a concrete mechanism.",
+      "Partitions by city for scale, blast radius, and residency in one decision.",
+      "Discusses batch matching as the evolution and names its fairness cost."
+    ],
+    "phases": ["req-rw", "shard-key", "req-consist", "realtime", "rt-transport", "compute", "req-geo"],
+    "quiz": [
+      {"q": "Why should driver locations not go into the relational database?", "a": "They are 250K tiny writes per second of latest-value, loss-tolerant data refreshed every few seconds; an in-memory geo index serves it, and the durable stream to Kafka covers history."},
+      {"q": "How is double assignment of a driver prevented?", "a": "A compare-and-set on the driver's state in the index (available to offered) and an optimistic version check when the ride record is assigned; a race loses and retries with the next candidate."},
+      {"q": "Why partition by city?", "a": "Traffic is naturally local, so city shards scale horizontally, contain incidents, satisfy residency, and let the in-memory index per city stay small and fast."}
+    ]
+  },
+  {
+    "id": "telemetry-platform",
+    "title": "Datacenter telemetry platform",
+    "difficulty": "staff",
+    "time": "45 min",
+    "prompt": "Design a platform that ingests metrics, traces, and logs from thousands of servers across hundreds of datacenters, some of them air-gapped, and serves dashboards, alerting, long-term analytics, and anomaly detection. 50M metric points per second.",
+    "whyAsked": "This is the scenario behind the DC Telemetry overlay in this app. It is a write-dominated, time-series, multi-region problem with a twist (air-gapped sites) that forces you to design for intermittent, delayed, and one-way data flow.",
+    "clarify": [
+      {"q": "Write to read ratio and read shape?", "a": "About 1000:1 writes. Reads are dashboard queries over recent data, bursting 10x during incidents, plus analytics over months."},
+      {"q": "What does air-gapped mean here?", "a": "No inbound or outbound internet. Data leaves only via a data diode or scheduled signed export, hours to a day late. Local operators still need dashboards and alerts."},
+      {"q": "Retention and resolution?", "a": "Raw 10-second resolution for 7 days, 1-minute for 30 days, 1-hour for 2 years. Logs 30 days hot, traces sampled."},
+      {"q": "Alerting latency?", "a": "Evaluate alert rules within 60 seconds of data arrival; alerting must survive the central plane being down."}
+    ],
+    "requirements": {
+      "functional": ["Agents emit metrics, traces, logs", "Regional ingest, rollups, and storage", "Dashboards with PromQL-style queries", "Alert evaluation and notification", "Long-term analytics over cold data", "Air-gapped sites operate standalone and export later"],
+      "nonFunctional": ["50M points per second aggregate", "Dashboard p99 under 2 seconds for 24-hour queries", "Alerting within 60 seconds regionally even if central is down", "Late data (hours old) accepted and correctly placed in time", "Per-datacenter isolation; one site's cardinality explosion cannot hurt others"]
+    },
+    "estimation": [
+      {"label": "Ingest", "work": "50M points per second at about 20 bytes compressed is 1 GB/s, 86 TB per day raw. Per region (say 20 regions) 2.5M points per second, within reach of a clustered time-series store."},
+      {"label": "Storage by tier", "work": "Raw 7 days: 600 TB per region fleet-wide on NVMe. 1-minute for 30 days is one sixth the rate: about 400 TB. Hourly for 2 years in object storage as Parquet: a few hundred TB at a fraction of the price."},
+      {"label": "Cardinality", "work": "5K servers per DC times 2,000 series per server is 10M active series per DC; cardinality, not points per second, is the limit, so per-DC caps and label governance are design requirements."},
+      {"label": "Query bursts", "work": "Normal 100 dashboard queries per second, incidents 1,000. Pre-aggregated rollups and a short-TTL query cache keep incident load off raw data."}
+    ],
+    "api": [
+      "Agent to gateway: gRPC stream of batched metric points with per-DC credentials",
+      "GET /query?expr=PromQL&start&end&step (auto-routes to the right resolution and tier)",
+      "Alert rules as code: PUT /rules",
+      "Air-gapped export: signed bundles of rollups, alerts, and sampled raw data"
+    ],
+    "dataModel": [
+      "Metric series keyed by (dc, host, metric name, labels); points as (timestamp, value); per-DC tenant label injected at ingest",
+      "Rollups per resolution; late points update the affected rollup windows via event-time watermarks",
+      "Logs and traces in a columnar store with tokenized full-text; traces sampled tail-based",
+      "Metadata (DCs, hosts, dashboards, rules) in Postgres; audit log append-only"
+    ],
+    "highLevel": "Agents on every server buffer locally and stream to a regional ingest gateway that authenticates per DC, enforces per-DC quotas and cardinality limits, and writes to a regional Kafka. Stream processors compute rollups with event-time windows, evaluate alert rules, and extract ML features. A regional time-series cluster holds hot and warm data; cold rollups go to object storage queried by a distributed SQL engine. A global query layer federates regions and routes by time range. Air-gapped DCs run the identical stack locally, evaluate alerts locally, and export signed bundles through a one-way path; the central plane ingests those bundles as late data placed at their original timestamps.",
+    "diagram": "graph TB\n  subgraph Connected DC\n    AG[Agents with disk buffer] --> IG[Ingest gateway: auth, quotas, cardinality]\n    IG --> K[[Regional Kafka]]\n    K --> SP[Stream processors: rollups, alerts, features]\n    SP --> TS[(Hot/warm time-series cluster)]\n    SP --> CH[(Logs + traces columnar store)]\n  end\n  subgraph Air-gapped DC\n    A2[Agents] --> L2[Local full stack: ingest, rollups, alerts, dashboards]\n    L2 --> DIODE[One-way export of signed bundles]\n  end\n  DIODE --> IMP[Late-data importer]\n  IMP --> TS\n  TS --> Q[Global query layer + cache]\n  CS[(Cold tier: object storage Parquet)] --> Q\n  TS --> CS\n  Q --> GR[Dashboards]\n  SP --> AL[Alert engine] --> PD[Pager / chat]",
+    "deepDives": [
+      {"title": "Ingest isolation and cardinality control", "body": "The gateway is where one DC's mistake is contained. Per-DC authentication, per-DC rate quotas, and a cardinality guard that rejects or drops series when a DC exceeds its active-series budget (and alerts the DC's owners). Without this, one team adding a request-id label takes the regional store down. Agents buffer hours on disk so a gateway outage loses nothing, and they send with backpressure, never unbounded retries.", "tradeoff": "Dropping series at the gateway loses data for the offending DC; the alternative is losing data for everyone. Make the drop visible and attributable."},
+      {"title": "Late and out-of-order data", "body": "Air-gapped exports and buffered agents deliver data hours late. Rollups must use event time, not arrival time, with watermarks that allow a lateness window (a day for air-gapped sources) and recompute the affected windows when late points arrive. Alert evaluation on late data is suppressed by policy (alerting on yesterday's CPU is noise), while analytics must include it. Each point carries its original timestamp and a source DC; the importer never re-stamps.", "tradeoff": "Long lateness windows hold more state in the stream processor; bound them per source type."},
+      {"title": "Query path and incident bursts", "body": "Dashboards hit a query layer that chooses resolution by range (raw under 6 hours, 1-minute under 2 days, hourly beyond) and routes to hot cluster or cold tier accordingly. A short-TTL cache keyed by query and time bucket absorbs the incident spike when hundreds of engineers open the same dashboards. The query tier is provisioned for 10x normal and never shares nodes with ingest. Heavy analytical queries go to the SQL engine over Parquet, not the hot cluster.", "tradeoff": "Pre-aggregation loses detail (percentiles over rolled-up data are approximate); keep raw for the hot window and histograms for latency metrics."},
+      {"title": "Air-gapped operation and the one-way path", "body": "The air-gapped stack is the same binaries and configuration as a connected region, deployed from a signed offline bundle: local ingest, rollups, alert evaluation, local notification (pager inside the facility), and local dashboards. Export is a scheduled job that writes signed, compressed bundles of rollups, alert events, and sampled raw data to the diode or transfer medium. The central importer verifies signatures, deduplicates by bundle id, and inserts as late data. Nothing flows inward except signed configuration updates via the same discipline in reverse, if allowed at all.", "tradeoff": "Running a full stack per air-gapped site is expensive and must be operated by local staff with runbooks; the alternative (no local alerting) is unacceptable for a facility that cannot call home."},
+      {"title": "Alerting that survives the center", "body": "Alert rules are evaluated regionally by the stream processors on fresh data, so a central plane outage does not silence pages. The alert engine runs with a minimum of three replicas, never scales to zero, and notification has a local retry queue and a circuit breaker on the pager provider. Rules are distributed as code from the central repository with a version, and regions keep evaluating the last known good rules when disconnected.", "tradeoff": "Regional evaluation duplicates compute and complicates global rules (across DCs); handle those few centrally with explicit degraded-mode behavior."}
+    ],
+    "failureModes": [
+      "One DC's cardinality explodes 100x: the gateway guard drops its new series and pages its owners; other DCs are unaffected.",
+      "Regional Kafka is down for an hour: agents buffer on disk; on recovery the backlog drains with ingest prioritized over rollups; dashboards show a gap that fills.",
+      "Central plane down during an incident: regional alerts still fire; dashboards degrade to regional views.",
+      "An air-gapped bundle arrives twice or corrupted: signature verification and bundle-id deduplication reject it; the gap is visible in a freshness dashboard per DC."
+    ],
+    "staffSignals": [
+      "Treats cardinality as the real scaling limit and puts the control at the ingest boundary.",
+      "Designs for event time and lateness as first-class, driven by the air-gapped requirement.",
+      "Separates ingest, query, and alerting failure domains and makes alerting survive central outages.",
+      "Models cost by tier and keeps incident query bursts off the raw store.",
+      "Uses one codebase for connected and air-gapped sites and reasons about the operational burden."
+    ],
+    "phases": ["req-rw", "req-geo", "db-primary", "shard-key", "msg", "analytics", "obs", "reliability", "cost", "compliance"],
+    "quiz": [
+      {"q": "What is the true scaling limit of a metrics platform and where do you enforce it?", "a": "Active series cardinality, not points per second. Enforce per-DC budgets at the ingest gateway so one source cannot exhaust the regional store."},
+      {"q": "How do you handle data that arrives a day late from an air-gapped site?", "a": "Rollups use event time with a lateness window and recompute affected windows; the importer keeps original timestamps and deduplicates by bundle id; alerting on late data is suppressed by policy while analytics include it."},
+      {"q": "Why must alert evaluation be regional?", "a": "So pages fire during a central-plane outage or a network partition; regions evaluate fresh data with last-known-good rules and notify through a local retry queue."}
+    ]
+  },
+  {
+    "id": "multitenant-saas",
+    "title": "Multi-tenant SaaS platform evolution",
+    "difficulty": "staff",
+    "time": "45 min",
+    "prompt": "You own a B2B analytics SaaS on a single-region, pooled Postgres with 8,000 tenants. One tenant is now 30 percent of load, EU customers require residency by next quarter, and enterprise prospects demand isolation. Design the target architecture and the migration without downtime or losing the big tenant.",
+    "whyAsked": "This is the shape of real staff work: an existing system, conflicting constraints, a sequencing problem, and an organization to carry along. There is no greenfield answer; the quality of the plan is the answer.",
+    "clarify": [
+      {"q": "What does the big tenant do that costs so much?", "a": "Bulk exports and heavy dashboard queries during their business hours; their data is 15 percent of the database."},
+      {"q": "What does EU residency require?", "a": "EU tenants' primary data and backups stay in the EU; processing may be pooled per region; metadata can be global."},
+      {"q": "What do enterprise prospects mean by isolation?", "a": "Evidence of logical isolation for most; a few regulated ones want a dedicated database or dedicated environment."},
+      {"q": "Team and timeline?", "a": "25 engineers across four teams; residency in one quarter, the rest over the year; feature work must continue."}
+    ],
+    "requirements": {
+      "functional": ["Tenant tiers: pooled, dedicated database, dedicated cell", "Tenant home region with enforced residency", "Per-tenant quotas and fair scheduling", "Online tenant migration between tiers and regions"],
+      "nonFunctional": ["Zero downtime for all migrations", "No regression for the big tenant", "Residency provable to auditors", "Blast radius bounded per cell"]
+    },
+    "estimation": [
+      {"label": "Load skew", "work": "One tenant at 30 percent of load and 15 percent of data: moving them to a dedicated database removes a third of the pooled load immediately and is the first move."},
+      {"label": "Regions", "work": "Two regions (US, EU) to start. Each region runs a complete cell set; global metadata (tenant directory, auth) is replicated with EU-safe fields only."},
+      {"label": "Migration volume", "work": "EU tenants are 2,000 of 8,000 with 25 percent of data; moving them is a per-tenant copy of a few GB each, batched over weeks with dual-write per tenant during cutover."}
+    ],
+    "api": [
+      "Internal: tenant directory service resolves tenant id to (region, cell, tier, database)",
+      "Edge router injects tenant context and routes to the tenant's region and cell",
+      "Admin: POST /tenants/{id}/migrate {targetCell} starts an online move"
+    ],
+    "dataModel": [
+      "Tenant directory (global, strongly consistent): tenant_id, home_region, cell_id, tier, migration_state",
+      "Per cell: a Postgres cluster with row-level security for pooled tenants; dedicated databases for tier-2 tenants; a full stack per cell",
+      "Per-tenant quota config and consumption counters"
+    ],
+    "highLevel": "Introduce a tenant directory and an edge router that resolves every request to a region and cell. Convert the existing database into cell 1 in the US with row-level security enforced. Stand up an EU region with its own cells. Add per-tenant quotas and fair queueing in the shared job system. Build one online tenant-migration tool (snapshot, CDC-based catch-up, dual-write, verify, flip the directory, drain) and use it for every move: first the whale to a dedicated database, then EU tenants to EU cells, then enterprise tenants to dedicated cells on request.",
+    "diagram": "graph LR\n  C[Clients] --> ER[Edge router]\n  ER --> TD[(Tenant directory)]\n  ER --> US1[US cell 1: pooled]\n  ER --> USW[US dedicated DB: whale]\n  ER --> EU1[EU cell 1: pooled]\n  ER --> EUD[EU dedicated cell: regulated]\n  MIG[Tenant migration tool] --> TD\n  MIG --> US1\n  MIG --> EU1\n  Q[Fair-scheduled job system] --> US1",
+    "deepDives": [
+      {"title": "Sequencing", "body": "Order by risk reduction per week of work. First, enforce row-level security and add the tenant directory with every tenant pointing at the current database; this is invisible to users and creates the routing seam. Second, build the migration tool and prove it by moving ten small tenants within the same region. Third, move the whale to a dedicated database: it cuts pooled load by a third and tests the tool on the hardest case under supervision. Fourth, stand up the EU region and migrate EU tenants in batches before the deadline. Fifth, offer dedicated cells as a tier. Each step ships value and can stop safely.", "tradeoff": "Doing residency first would be deadline-driven but would mean migrating 2,000 tenants with an unproven tool; the whale move is the rehearsal that makes the EU wave safe."},
+      {"title": "The online tenant migration tool", "body": "One tool, used for every move. Steps: mark tenant as migrating in the directory; snapshot their rows to the target; stream changes via CDC filtered by tenant id until lag is near zero; enable dual-write at the application layer for that tenant; run automated comparison until discrepancies are zero for a sustained window; flip the directory entry so the router sends the tenant to the target; keep dual-write briefly for rollback; drain and delete from the source after a retention window. The tenant sees no downtime; worst case is a few seconds of elevated latency at the flip.", "tradeoff": "Per-tenant CDC filtering and dual-write require every write path to carry tenant context, which the row-level-security work already guarantees."},
+      {"title": "Residency enforcement", "body": "The directory is the source of truth for home region. The edge router refuses to route an EU tenant's request to a US cell. Backups, replicas, and the warehouse are per region; cross-region replication carries only non-tenant metadata. Audit evidence is produced automatically: a report of every tenant's region and a check that no EU tenant row exists in any US store (periodic scan).", "tradeoff": "Global features (cross-tenant benchmarking) need aggregated, anonymized data pipelines that respect residency; defer them or compute per region."},
+      {"title": "Noisy neighbor controls and cells", "body": "Beyond moving the whale, add per-tenant statement timeouts, per-tenant job queues with weighted fair scheduling, cache namespaces with memory caps, and API rate limits by plan. Cells bound blast radius: a cell is a full stack serving a few hundred tenants with no cross-cell calls; capacity grows by adding cells, and a bad deploy canaries on one cell first. The dedicated tier is simply a cell with one tenant.", "tradeoff": "Cells multiply operational surface (N databases, N deploy targets); invest in automation and treat the cell as the unit of everything before adding the third one."},
+      {"title": "Carrying the organization", "body": "Four teams: one owns the directory and router, one the migration tool, one quotas and job scheduling, and product teams keep shipping behind the routing seam. Feature freeze only on the write paths being instrumented for tenant context, for two weeks. Publish a migration dashboard (tenants moved, discrepancy rate, residency compliance) so leadership sees progress weekly and the deadline risk is visible early.", "tradeoff": "Dedicating three teams to platform work slows features for a quarter; the EU deadline and the enterprise pipeline make the business case."}
+    ],
+    "failureModes": [
+      "Dual-write diverges for one tenant during migration: comparison alerts, the flip is blocked, and the tenant stays on the source with no user impact.",
+      "The directory service is down: the router uses a cached copy with a short TTL and fails closed for tenants not in cache.",
+      "The whale's dedicated database is undersized: moving them back is the same tool in reverse; size with a load test replaying their real queries first.",
+      "An engineer adds a query path without tenant context: row-level security returns no rows rather than wrong rows, and a CI check fails the build."
+    ],
+    "staffSignals": [
+      "Produces a sequence with a reason for each step and a safe stopping point after each.",
+      "Builds one reusable migration mechanism and proves it on low-risk tenants before the deadline-driven wave.",
+      "Makes residency enforceable by the router and provable by an automated report.",
+      "Names the team structure, the feature-work impact, and the visibility leadership needs."
+    ],
+    "phases": ["tenant", "tenant-iso", "tenant-noise", "req-geo", "compliance", "comp-pii", "mig-store", "mig-strangler", "arch-platform"],
+    "quiz": [
+      {"q": "Why move the whale tenant before the EU wave even though the EU has the deadline?", "a": "It removes a third of pooled load immediately, and it proves the migration tool on the hardest single case under supervision, so the 2,000-tenant EU wave runs on a tested mechanism."},
+      {"q": "What makes residency provable rather than promised?", "a": "A directory that is the sole source of truth for home region, a router that refuses cross-region routing, per-region backups and replicas, and an automated scan proving no EU tenant data exists in US stores."},
+      {"q": "What are the phases of an online single-tenant migration?", "a": "Mark migrating, snapshot to target, CDC catch-up, dual-write, automated comparison to zero discrepancies, flip the directory, brief dual-write for rollback, drain and delete from the source."}
+    ]
+  }
+]

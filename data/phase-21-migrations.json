@@ -11,6 +11,9 @@
     "hyper"
   ],
   "short": "Schema · datastore · service extraction · zero-downtime — the art of changing the engine while the plane is flying",
+  "tldr": "Migration is changing a live, revenue-bearing system without downtime or data loss. Four kinds in rising difficulty: schema evolution, datastore migration, service extraction, and architectural rewrites. The universal method is expand, dual-run, verify, cut over, contract. The big-bang rewrite is the one pattern that reliably fails.",
+  "keyInsight": "The hard part of a migration is never the new system; it is the long tail of the old one: the forgotten cron job, the report nobody owns, the query that only runs at quarter end. Migrations succeed by making the old and new coexist for long enough to find the tail, and by measuring the comparison instead of trusting it.",
+  "mentalModel": "Replacing a bridge while traffic keeps flowing. You build the new span alongside (expand), route a lane across it and watch the strain gauges (dual-run and verify), move all lanes over once the gauges agree (cut over), and only then dismantle the old span (contract). Closing the road for a year to build a better bridge is how you lose the city.",
   "detail": {
     "what": "Migration is the discipline of evolving your live, running, revenue-generating system without downtime, data loss, or user disruption. It covers four types of change, in increasing order of difficulty and risk: (1) Schema evolution — changing database tables (adding columns, changing types, dropping fields) while the application is running. (2) Datastore migration — moving from one database technology to another (MySQL → PostgreSQL, PostgreSQL → Cassandra, MongoDB → DynamoDB) while the system serves live traffic. (3) Service extraction — pulling a bounded context out of a monolith into an independent service with its own database and deployment. (4) Large-scale backfills — populating a new column or table with data derived from existing data, across billions of rows, without degrading production performance. Each of these sounds conceptually simple but is operationally treacherous. A column rename that takes 30 seconds on your laptop locks a 1-billion-row production table for hours. A datastore migration that 'just' moves data to a new engine risks subtle data loss from encoding differences, timezone handling, or NULL semantics. Service extraction that 'just' moves code to a new repo splits one transaction boundary into two, introducing consistency bugs. The common thread: every migration must be reversible at every step, the system must remain fully operational throughout, and the migration must be invisible to users. This requires patterns (expand-contract, dual-write, strangler fig) that are well-understood but require discipline to execute.",
     "why": "Every successful system needs to evolve. Requirements change (you need multi-tenancy, you need global distribution, you need stronger consistency). Technology improves (PostgreSQL 16 is faster than 12, ScyllaDB is cheaper per-node than Cassandra, gRPC is faster than REST for internal calls). Scale changes (what worked at 100GB is unacceptable at 10TB). The teams growing the codebase discover that early architectural decisions — made correctly for the constraints of that time — are now the bottleneck. Without migration capability, you're stuck with day-one decisions forever, accumulating technical debt that compounds like financial debt until the system is unmaintainable. The migration capability — the ability to change any part of the system while it's running — is the single most important long-term architectural capability. It's what separates systems that age gracefully (Shopify's monolith, evolving for 15+ years) from systems that must be rewritten (Twitter's Ruby monolith, abandoned after 5 years of pain). Building migration into your engineering culture means you're never trapped by a past decision. The most dangerous phrase in engineering is 'we can't change that — it would require a migration.' If migration is too hard, the system can't evolve, and the system dies.",
@@ -138,6 +141,34 @@
       ]
     }
   },
+  "interview": {
+    "prompt": "'We need to move from MySQL to Postgres' or 'extract billing from the monolith' is a staff-level prompt because the hard part is sequencing and risk, not design.",
+    "senior": "Describes dual-writing to both systems, backfilling old data, switching reads, and then retiring the old system, with feature flags for rollback.",
+    "staff": "Starts by asking whether the migration is worth it and what the measurable goal is. Lays out the phases with exit criteria for each: expand (new system receives writes via dual-write or CDC), backfill with throttling to protect replication, shadow reads with automated comparison and a discrepancy dashboard, gradual read cutover by percentage or tenant with instant rollback, write cutover, then contract (remove old paths, which is the step teams skip). Identifies the long tail up front by inventorying every reader and writer of the old store, including jobs and reports. Chooses application-level dual-write versus CDC by consistency needs and code sprawl. Plans for the migration taking longer than expected and for the team's morale. Treats migrations as a core competency with reusable tooling, the way Stripe does.",
+    "probes": [
+      "During dual-write, one write succeeds and the other fails. What state are you in, and how do you detect it?",
+      "How do you find every consumer of the old table?",
+      "What is your rollback at each phase, and at which phase does rollback become impossible?"
+    ]
+  },
+  "quiz": [
+    {
+      "q": "Name the five phases of a safe migration and what each proves.",
+      "a": "Expand (new system exists and receives writes), backfill (history is copied without hurting production), verify (shadow reads compare old and new and discrepancies trend to zero), cut over (reads then writes move gradually with rollback), contract (old paths removed so the migration is actually finished)."
+    },
+    {
+      "q": "Why do big-bang rewrites fail?",
+      "a": "The old system encodes years of undocumented behavior, the new one must match all of it before any value ships, the rewrite takes longer than planned while the old system keeps changing, and the cutover is a single enormous risk event with no incremental learning. Incremental migration delivers value early and finds the long tail gradually."
+    },
+    {
+      "q": "What is dual-write without comparison, and why is it dangerous?",
+      "a": "Writing to old and new stores but never verifying they agree. Silent divergence (a failed second write, a transformation bug, a race) accumulates until cutover reveals it. Dual-write must pair with automated comparison and a drift metric that gates cutover."
+    },
+    {
+      "q": "Why does a backfill need throttling?",
+      "a": "Copying billions of rows at full speed saturates the source's I/O and floods replication, so replicas lag and reads go stale or fail. Backfill in batches with pauses, monitor replication lag and p99 latency, and slow down automatically when they rise."
+    }
+  ],
   "children": [
     {
       "name": "Schema Evolution",
@@ -152,6 +183,9 @@
         "hyper"
       ],
       "short": "Expand-contract · online DDL · forward-only — change the schema without breaking the app",
+      "tldr": "Code and schema deploy at different times, so every schema change must be compatible with both the old and new code at once. Expand-contract: add the new column or table, deploy code that writes both and reads new with fallback, backfill, switch reads, then drop the old. Use online DDL tools so no migration locks a hot table.",
+      "keyInsight": "A schema migration is a distributed systems problem in miniature: two versions of your code and two versions of your schema coexist for minutes to weeks, and every combination must work. The expand-contract pattern is just making that coexistence explicit.",
+      "mentalModel": "Renaming a street. You put up the new sign alongside the old one (expand), update the maps and mail while both names deliver (migrate), wait until nobody uses the old name (verify), then take the old sign down (contract). Swapping the sign overnight strands every letter already in the post.",
       "detail": {
         "what": "Schema evolution is the practice of changing your database structure (adding columns, changing types, dropping tables, adding indexes) while the application is running, without downtime, data loss, or errors. The core challenge: your application code and your database schema are deployed at different times. If you change both simultaneously, there's a window where the old code runs against the new schema (or vice versa) — and if they're incompatible, you get errors. The expand-contract pattern solves this by ensuring the schema is always compatible with both old and new code at every step. It has 6 phases, each deployed independently: (1) Expand: add the new column/table (additive only — the old code ignores new columns it doesn't know about). (2) Dual-write: update code to write to both old and new locations. (3) Backfill: copy existing data from old to new. (4) Switch reads: update code to read from new location. (5) Stop old writes: remove dual-write, write only to new. (6) Contract: drop the old column/table. This looks like overkill for a simple column addition — and at small scale, it is. But at medium scale and above (tables with millions of rows, multiple services reading the same table), expand-contract is the only safe pattern. It's the difference between 'migration is a non-event' and 'migration caused an outage.'",
         "why": "Database schema changes are the most common cause of deployment-related outages in production systems. The failure modes are specific and predictable: (1) Locking: ALTER TABLE on a large table acquires an exclusive lock, blocking all reads and writes for seconds to hours. (2) Incompatibility: new code expects a column that doesn't exist yet (code deployed before migration), or old code writes to a column that's been removed (migration applied before code). (3) Backfill race: new column has a NOT NULL constraint but existing rows have NULL — application crashes on read. (4) Replication lag: migration finishes on primary but replicas are behind — reads from replica see old schema. Each of these is preventable with the expand-contract pattern and online migration tools. The investment: learning the pattern (1 day), setting up tooling (1 day), discipline to follow it every time (ongoing). The payoff: never having a migration-related outage again.",
@@ -257,6 +291,44 @@
           "desc": "Service A adds a column to a shared table. Service B adds a different column to the same table. Both migrations run simultaneously — one succeeds, one fails due to lock contention (or both create conflicting intermediate states). At scale with multiple teams: use a migration lock (only one migration per table at a time) or a migration queue. Atlas and Skeema handle this by computing diffs from the desired state rather than running manual migration scripts."
         }
       ],
+      "examples": [
+        {
+          "name": "GitHub's gh-ost for MySQL",
+          "desc": "GitHub built gh-ost to run ALTER TABLE on huge, hot MySQL tables without locking: it creates a shadow table with the new schema, copies rows in throttled chunks, tails the binlog to apply ongoing changes, and atomically swaps names at the end. It can pause itself based on replication lag. It exists because a locking ALTER on a billion-row table is an outage."
+        },
+        {
+          "name": "Stripe's schema change discipline",
+          "desc": "Every schema change ships as a multi-step sequence with code deploys between steps, with a rule that no deploy can both change the schema and depend on that change. Backfills run as idempotent, resumable, throttled jobs. The discipline turns schema changes from incidents into routine."
+        }
+      ],
+      "interview": {
+        "prompt": "'You need to rename a column on a table with a billion rows, zero downtime.' Candidates who say ALTER TABLE have failed; the interviewer wants the sequence.",
+        "senior": "Describes expand-contract: add the new column, dual-write, backfill, switch reads, drop the old column, with an online migration tool.",
+        "staff": "Gives the sequence with the deploy boundaries explicit and explains what breaks if two steps are combined. Adds the operational specifics: nullable column with no default on a large table (adding NOT NULL or a default rewrites the table on some databases), backfill in batches with throttling on replication lag, index creation concurrently, and a lock timeout on every DDL so a migration fails fast instead of queueing every query behind it. Uses online DDL tools for MySQL and knows Postgres's lock behaviors. Ensures rollback at every step by keeping the old column until reads are proven off it. Coordinates across services sharing a table by ordering deploys and using feature flags. Treats migrations as forward-only, with compensating migrations rather than down scripts.",
+        "probes": [
+          "What happens if you add a NOT NULL column with a default to a 500 million row Postgres table?",
+          "Why forward-only migrations instead of up and down?",
+          "Two services read this table. How do you order the change?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "List the expand-contract steps for renaming a column with zero downtime.",
+          "a": "Add the new column (nullable). Deploy code that writes to both and reads from the new with fallback to the old. Backfill in throttled batches. Verify reads can rely on the new column. Deploy code that reads only new and stops writing old. Drop the old column. Each step is a separate deploy."
+        },
+        {
+          "q": "Why can adding a column with NOT NULL or a default be an outage?",
+          "a": "On many databases it rewrites every row or holds an exclusive lock while it validates, blocking all reads and writes for the duration on a large table. Add the column nullable, backfill in batches, then add the constraint with a validation step that does not take a long lock."
+        },
+        {
+          "q": "What does a lock timeout on DDL protect you from?",
+          "a": "A DDL statement waiting for a lock blocks every query behind it in the lock queue, so a migration waiting on one long transaction can halt the whole table. A short lock timeout makes the migration fail and retry instead of freezing production."
+        },
+        {
+          "q": "Why do teams prefer forward-only migrations?",
+          "a": "Down migrations are rarely tested, often lossy (dropping a column discards data), and give false confidence. Forward-only with a compensating migration when needed matches how rollbacks actually work: deploy a new change that restores compatibility, never run untested reverse DDL."
+        }
+      ],
       "related": [
         {
           "id": "db-primary",
@@ -277,6 +349,9 @@
         "hyper"
       ],
       "short": "Dual-write · shadow-read · gradual cutover — the highest-stakes migration in engineering",
+      "tldr": "Moving between database technologies while serving traffic is the highest-stakes migration. Dual-write or CDC into the new store, backfill history, shadow-read and compare until discrepancies hit zero, cut over reads then writes gradually with rollback, then decommission. Expect it to take longer than any estimate.",
+      "keyInsight": "A datastore migration is finished when the old store is turned off, not when the new one is turned on. Most migrations stall at 90 percent with both stores running for years because the last 10 percent of readers were never inventoried and nobody owns the contraction.",
+      "mentalModel": "Moving a library to a new building while it stays open. Every new book is shelved in both buildings (dual-write), the old collection is trucked over in batches at night (backfill), librarians check random titles in both places (shadow-read and compare), readers are sent to the new building a floor at a time (gradual cutover), and only when the old building has had no visitors for a month is it sold. The ghost of the migration is the one reader who still has the old address.",
       "detail": {
         "what": "Datastore migration is moving from one database technology to another while the system serves live traffic: MySQL → PostgreSQL, PostgreSQL → Cassandra, MongoDB → DynamoDB, or any combination. This is the highest-stakes migration in engineering because: (1) data models may differ (relational → document, row-oriented → column-oriented), requiring transformation of every record; (2) query semantics differ (JOIN behavior, NULL handling, transaction isolation, timestamp precision), causing subtle correctness bugs; (3) performance characteristics differ, potentially invalidating all your capacity planning; and (4) data loss is irrecoverable — unlike code bugs which can be patched, lost or corrupted data may be gone forever. The standard playbook (pioneered and documented by Stripe) has 5 phases: (1) Backfill: copy all existing data from old to new, with transformation. (2) Dual-write: application writes to both old (authoritative) and new. (3) Shadow-read: for every production read, also read from new and compare — log discrepancies, don't serve the new result yet. (4) Cutover: gradually shift reads from old to new (1% → 10% → 100%). (5) Cleanup: stop writing to old, decommission. Each phase can take weeks. The total migration typically takes 6–18 months for a large datastore.",
         "why": "You migrate datastores when the current one has become a bottleneck that can't be solved by optimization within the same technology. Common triggers: (1) Scale ceiling: PostgreSQL single-node can't handle your write throughput; you need Cassandra's horizontal scaling. (2) Cost: DynamoDB at high throughput is 10× more expensive than self-managed Cassandra. (3) Data model mismatch: you stored time-series data in PostgreSQL, but query patterns don't need JOINs and you need 100× write throughput — Cassandra fits naturally. (4) Feature needs: you need global distribution with tunable consistency — CockroachDB or Spanner. (5) Operational burden: self-managed MySQL is consuming 30% of your DBA team's time; managed Aurora reduces this to near zero. Whatever the trigger, the migration is a significant engineering investment. The decision to migrate should be backed by concrete numbers: 'we need 100K writes/sec, our current DB tops at 20K, and vertical scaling adds $50K/month for only 40K — migration to Cassandra gives us 100K+ at $20K/month.' Without concrete numbers, consider whether optimization of the current datastore (indexes, query rewriting, caching, read replicas) could solve the problem for 10× less effort.",
@@ -351,6 +426,52 @@
           "desc": "Discord migrated trillions of chat messages from Cassandra to ScyllaDB (a C++ reimplementation of Cassandra with 3–10× better per-node performance and no JVM garbage collection pauses). Because ScyllaDB is Cassandra-compatible at the protocol level, the migration was simpler than a typical datastore migration: same data model, same query patterns, same drivers. They built a custom data migrator for the initial backfill, ran dual-reads for weeks to verify data integrity, and gradually shifted traffic. Post-migration: tail latency improved dramatically (ScyllaDB has no GC pauses) and they reduced their cluster size by 3×."
         }
       ],
+      "pitfalls": [
+        {
+          "name": "Data model mismatch discovered late",
+          "desc": "Relational rows with joins do not map cleanly onto a document or wide-column model. Teams start dual-writing before designing the target model for the actual query patterns and discover that a query that was a join is now a scatter-gather, or that a transaction now spans two documents. Design the target model from the query inventory first, and prototype the hardest queries before writing a line of migration code."
+        },
+        {
+          "name": "Comparison that only checks existence",
+          "desc": "Shadow reads confirm the row exists in both stores but not that every field matches, that ordering is the same, or that nulls and timezones were transformed identically. Compare full normalized records, track discrepancy rate by field, and gate cutover on a sustained near-zero rate."
+        },
+        {
+          "name": "Cutover without tenant or percentage granularity",
+          "desc": "Switching all reads at once turns any missed case into a full outage. Cut over by percentage, by tenant, or by endpoint with a flag that flips back in seconds, and watch error rates and latency per cohort."
+        },
+        {
+          "name": "Nobody owns decommissioning",
+          "desc": "After cutover the project is declared done, the old database keeps running (and costing) for years, and its stale data becomes a liability. Decommissioning is a phase with an owner, a date, and a checklist: remove dual-writes, block access, snapshot for archive, delete."
+        }
+      ],
+      "interview": {
+        "prompt": "'Migrate the orders table from Postgres to DynamoDB with zero downtime.' Beyond the phases, the interviewer wants to hear about the data model and the comparison.",
+        "senior": "Dual-writes to both stores, backfills, shadow-reads to compare, cuts over reads then writes behind flags, and decommissions the old store.",
+        "staff": "Begins with whether to migrate at all and with the target data model designed from the query inventory, including the queries the new store makes expensive. Picks the write path: application-level dual-write (simple, risks partial failure) or CDC from the old store's log (consistent, lags slightly, no code sprawl), and explains how to detect and repair divergence in each. Designs backfill as idempotent, resumable, throttled on source health. Builds automated comparison with field-level discrepancy metrics and a dashboard that gates each phase. Cuts over by cohort with instant rollback and monitors per-cohort SLOs. Plans decommissioning explicitly. Discusses the people side: the migration will take two to three times the estimate and must deliver intermediate value to survive reprioritization.",
+        "probes": [
+          "Application dual-write or CDC: which do you choose here and what does each get wrong?",
+          "Your discrepancy rate is stuck at 0.01 percent. Do you cut over? How do you decide?",
+          "What is the last reader of the old store, and how do you know?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "Compare application dual-write with CDC-based replication for a migration.",
+          "a": "Application dual-write is simple to start but has partial-failure cases (one write succeeds), scatters logic across services, and needs reconciliation. CDC reads the old store's log and replicates every committed change in order, giving consistency without code changes, at the cost of pipeline infrastructure and some lag."
+        },
+        {
+          "q": "What must a shadow-read comparison measure to gate cutover?",
+          "a": "Field-level equality of normalized records, ordering of lists, handling of nulls and types, latency of the new store versus the old, and discrepancy rate over time by field and by cohort. Cutover is gated on a sustained near-zero discrepancy rate, not on a single clean sample."
+        },
+        {
+          "q": "Why cut over by cohort rather than all at once?",
+          "a": "A cohort (1 percent of traffic, one tenant, one endpoint) bounds the blast radius of any missed case and gives a comparison group for latency and errors. Rollback is a flag flip for that cohort, not an emergency for every user."
+        },
+        {
+          "q": "How did Discord migrate trillions of messages from Cassandra to ScyllaDB?",
+          "a": "They wrote a data service in Rust in front of both stores, used it to dual-write and to coalesce hot reads, built a custom migrator that copied data at very high throughput with checkpoints, verified by comparison, and cut over per cluster. The data service abstraction made the migration invisible to the application."
+        }
+      ],
       "related": [
         {
           "id": "db-primary",
@@ -375,6 +496,9 @@
         "hyper"
       ],
       "short": "Incrementally replace a monolith — the safe alternative to the big rewrite",
+      "tldr": "Put a routing layer in front of the legacy system and move one capability at a time to a new implementation, routing its traffic to the new path while everything else stays on the old. The old system shrinks until it is gone. It is the safe alternative to the rewrite and the way every successful monolith decomposition has happened.",
+      "keyInsight": "The strangler fig works because it converts one enormous risk into many small ones, each with its own rollback. The pattern fails when the new and old paths share state they both mutate, because then the 'small' step is secretly a distributed transaction.",
+      "mentalModel": "Renovating a house room by room while living in it. You install a door (the routing facade) and redo the kitchen first; the family eats in the new kitchen while the old living room is untouched. Each room is a weekend with a tarp you can pull back. The alternative, moving out for a year while the house is rebuilt, is how families end up renting forever.",
       "detail": {
         "what": "The Strangler Fig pattern (named by Martin Fowler after the strangler fig tree that grows around and eventually replaces its host tree) is a strategy for migrating from a legacy system to a new one by gradually routing specific traffic to the new system while the old system continues serving everything else. Over time, more and more traffic routes to the new system until the old system handles nothing and can be removed. The key mechanism is a routing layer (reverse proxy, API gateway, or service mesh) that sits in front of both old and new systems and decides, per request, which backend handles it. This lets you: (1) migrate one endpoint at a time (start with the simplest, lowest-risk endpoint), (2) validate each migration in production with real traffic before moving to the next, (3) roll back any individual endpoint to the old system if issues arise, and (4) run old and new in parallel for comparison (dual-read/shadow traffic). The pattern is the opposite of a 'big-bang rewrite' where you build the entire new system, then switch all traffic at once. Big-bang rewrites have a >50% failure rate (Netscape, Borland, Twitter's initial Ruby rewrite) because the new system invariably has bugs, missing features, and performance issues that only appear under real production traffic. The strangler fig succeeds because each piece is validated in production before the next is attempted.",
         "why": "Every large software system eventually reaches a point where the current architecture — chosen correctly for the constraints of 5 years ago — has become a bottleneck. The monolith that was perfect for 10 engineers is a merge-conflict nightmare for 100. The MySQL database that was ideal for 1TB is groaning under 50TB. The PHP codebase that launched the company is now impossible to hire for. The instinct is to rewrite from scratch: 'we'll build it right this time, in a modern language, with a clean architecture.' This instinct is almost always wrong. Joel Spolsky (Netscape), Twitter (initial Ruby → JVM attempt), and countless others have demonstrated that big-bang rewrites fail because: (1) the old system represents 5 years of production-learned edge cases, bug fixes, and optimizations that the rewrite team doesn't know about, (2) the rewrite takes 2× longer than estimated (always), during which the old system must also be maintained (feature-frozen products lose customers), and (3) the cutover day reveals hundreds of discrepancies that weren't caught in testing. The strangler fig avoids all of these failure modes: each piece is small enough to understand fully, production-validated before the next, and independently reversible. It takes longer (6 months to 3 years vs the rewrite team's estimate of 6 months) but it actually works. The most successful migrations in tech history (Twitter's eventual Ruby → Scala, Amazon's monolith → services, Shopify's modularization) all followed the strangler fig approach.",
@@ -449,6 +573,52 @@
         {
           "name": "Amazon's 2002 API Mandate — the original service extraction",
           "desc": "In 2002, Jeff Bezos issued the famous 'API mandate': all teams must expose their functionality through service interfaces, all communication must happen through these interfaces, no direct access to another team's data store. This was the beginning of Amazon's transition from monolith to services — executed over many years, one service at a time, using what we would now call the strangler fig pattern. Each team extracted their functionality into a service, with the monolith gradually routing traffic to the new services. This migration took years and involved thousands of engineers, but it enabled Amazon to scale to the company it is today. The mandate is the most famous example of strangler-fig-at-organizational-scale."
+        }
+      ],
+      "pitfalls": [
+        {
+          "name": "Shared mutable state across the seam",
+          "desc": "The new service and the legacy code both write the same table. Now every migrated endpoint is a dual-write with no transaction, and subtle ordering bugs appear under load. Migrate data ownership along with behavior: the new service becomes the sole writer of its tables, and the legacy system reads through it or via replicated views."
+        },
+        {
+          "name": "Facade that becomes a permanent tax",
+          "desc": "The routing layer added for the migration accumulates logic (transformations, retries, auth) and remains after the migration as an undocumented second gateway. Keep the facade thin, time-box it, and fold its responsibilities into the real gateway when the migration ends."
+        },
+        {
+          "name": "Extracting the wrong thing first",
+          "desc": "Teams start with the most tangled module because it hurts most, and the migration stalls on its dependencies. Start with a capability that is valuable, well-bounded, and has few callers, prove the pipeline, then take on harder seams with the tooling and confidence earned."
+        },
+        {
+          "name": "No end state",
+          "desc": "Half the capabilities move, the rest stay forever, and the company runs two systems indefinitely with the legacy one unowned. Define the end state, track percentage of traffic on the new path as a visible metric, and schedule the decommission."
+        }
+      ],
+      "interview": {
+        "prompt": "'We have a 10-year-old monolith. How do you modernize it without stopping feature work?' This is the quintessential staff prompt because it is about sequencing, risk, and the organization.",
+        "senior": "Describes the strangler fig: put a proxy in front, extract services one at a time, route traffic to the new ones, retire the monolith gradually.",
+        "staff": "Starts by asking what modernization is for (velocity, scale, reliability, hiring) and picks seams accordingly. Places the facade at a layer that can route by path, header, or tenant, and keeps it thin. Chooses the first extraction for value and low coupling, and uses it to build the reusable pipeline: data ownership transfer, dual-run comparison, flag-based cutover, observability across old and new. Addresses state: each extraction moves write ownership, with CDC or replicated views for legacy readers. Keeps feature work flowing by freezing only the module being moved and by giving the monolith's owners the extracted service. Tracks progress as percentage of traffic and code on the new path, decides explicitly which parts of the monolith will never move, and sets a decommission plan. Cites Twitter's Ruby-to-Scala and Shopify's modularization-without-extraction as two valid end states.",
+        "probes": [
+          "Which capability do you extract first, and what makes it the right first choice?",
+          "The extracted service and the monolith both need the customer table. Who owns it, and how does the other read it?",
+          "How do you keep the monolith team motivated while their code is being strangled?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "What are the three elements of the strangler fig pattern?",
+          "a": "A facade or routing layer that intercepts calls to the legacy system, incremental replacement of one capability at a time behind that facade with traffic routed to the new implementation, and eventual decommissioning of the legacy system once nothing routes to it."
+        },
+        {
+          "q": "Why must data ownership move with behavior during extraction?",
+          "a": "If the new service and the legacy code both write the same tables, every extracted endpoint becomes an untransacted dual-write with ordering and consistency bugs. The new service must be the sole writer of its data; legacy readers get it through the service or through replicated read models."
+        },
+        {
+          "q": "What makes a good first extraction candidate?",
+          "a": "A capability with clear business value, a narrow and stable interface, few callers, little shared state, and a team willing to own it. It proves the pipeline cheaply; the hardest module should be among the last, when tooling and confidence exist."
+        },
+        {
+          "q": "How is Shopify's approach a strangler fig without extraction?",
+          "a": "They applied the same incremental method inside the monolith: define boundaries, enforce them with tooling, migrate code module by module to respect them, and measure progress. The end state is a modular monolith rather than services, which shows the pattern is about incremental, measured replacement, not about microservices."
         }
       ],
       "related": [

@@ -1,0 +1,65 @@
+{
+  "title": "System Design for Staff Engineers",
+  "subtitle": "Twenty-one phases, five arcs, one way of thinking",
+  "intro": "Every system design question has the same shape: quantify the problem, choose where state lives, decide how work moves, keep it alive, and evolve it. These five arcs follow that shape. Work them in order the first time. After that, use the Map to jump, the Drill to retain, and the Practice problems to rehearse.",
+  "howToStudy": [
+    "Read one lesson at a time. Each opens with a one-breath summary and a key insight; read those twice before the body.",
+    "Do the 'Check yourself' questions at the end of every lesson without looking. Retrieval, not rereading, is what makes it stick.",
+    "Mark lessons done. The Drill deck pulls from finished lessons and schedules reviews at growing intervals.",
+    "After each arc, do one Practice problem out loud, timed to 40 minutes, and compare against the worked staff answer.",
+    "Turn on the DC Telemetry overlay once you have finished an arc, and reread the arc's lessons through that lens. Seeing one real system make every decision is how the framework becomes a reflex."
+  ],
+  "arcs": [
+    {
+      "id": "arc-frame",
+      "title": "Frame the problem",
+      "theme": "Numbers before boxes",
+      "narrative": "Nothing in system design is right in the abstract. A database is correct for a workload, an architecture is correct for a team, an API is correct for its consumers. This arc is about earning the right to say 'it depends' by knowing what it depends on. By the end you should be able to take a two-sentence prompt and, in ten minutes, produce the five numbers that shape the design, the team-size argument for the architecture style, and the API contract you will not regret in five years.",
+      "phases": ["req", "arch", "api"],
+      "staffLens": "Staff candidates are distinguished in the first ten minutes. They drive the clarification, they quantify out loud, they name what is out of scope, and they identify the one or two constraints that actually matter. Everything after that is execution."
+    },
+    {
+      "id": "arc-state",
+      "title": "Decide where state lives",
+      "theme": "Data has gravity",
+      "narrative": "The database decision is the least reversible one you will make, and the way you split, copy, and cache data determines the ceiling of everything above it. This arc runs from the single Postgres primary to global sharded stores, through caching, search, replication, and object storage, and ends with the analytical side: keeping the dashboards off the production database. Learn the ladder, and learn the number at which each rung stops working.",
+      "phases": ["db", "shard", "storage", "analytics"],
+      "staffLens": "Senior engineers pick a database. Staff engineers pick the moment they will have to change it, and design so that moment is survivable: derived data that can be rebuilt, logical shards that can be moved, a key that will not create a hot spot in year three."
+    },
+    {
+      "id": "arc-flow",
+      "title": "Move work through the system",
+      "theme": "Stateless compute, asynchronous edges, pushed data",
+      "narrative": "Once state has a home, the question is how requests reach it and how work gets done without the user waiting. This arc covers compute models and load balancing, the asynchronous patterns that make systems resilient, the networking substrate that sets the latency floor, and real-time delivery for systems that must feel alive. The recurring lesson: keep compute disposable, make every consumer idempotent, and know what the network costs per round trip.",
+      "phases": ["compute", "msg", "network", "realtime"],
+      "staffLens": "The staff signal here is control of the reaction to failure: timeouts shorter than budgets, retries with budgets, backpressure, idempotency, and the honest accounting of what happens in the ninety seconds before autoscaling catches up."
+    },
+    {
+      "id": "arc-run",
+      "title": "Keep it alive",
+      "theme": "Failure is certain, outages are optional",
+      "narrative": "Everything in the first three arcs will break. This arc is about designing for that: bounded blast radius, circuit breakers and load shedding, observability that lets you ask any question in minutes, security that assumes the network is hostile, operations that make deploys boring, testing that treats production as the final environment, and cost discipline so the system survives its own bill.",
+      "phases": ["reliability", "obs", "security", "ops", "test", "cost"],
+      "staffLens": "Interviewers walk a finger across your diagram asking 'what if this fails?' Staff candidates answer each box with a blast radius and a tested recovery, and they volunteer the organizational pieces: on-call, error budgets, game days, postmortems."
+    },
+    {
+      "id": "arc-evolve",
+      "title": "Evolve it",
+      "theme": "Change the engine while the plane is flying",
+      "narrative": "Staff-level problems are rarely greenfield. They are 'we have ten thousand tenants and one of them is ruining it for the rest', 'add an AI feature to this', 'our users are now in the EU', and 'move off this database without downtime'. This arc covers multi-tenancy, ML infrastructure, compliance as architecture, and the migration patterns that let a live system be rebuilt one capability at a time.",
+      "phases": ["tenant", "ml", "compliance", "migrate"],
+      "staffLens": "The staff difference is sequencing and risk: which thing to move first, what the rollback is at each phase, how to find the long tail of the old system, and how to keep the team shipping features while the migration runs."
+    }
+  ],
+  "studyPlan": {
+    "title": "Six-week plan",
+    "weeks": [
+      {"week": 1, "focus": "Arc 1: Frame the problem", "do": "Read all Requirements, Architecture, and API lessons. Memorize the estimation numbers in Reference. Practice: URL shortener and rate limiter, timed."},
+      {"week": 2, "focus": "Arc 2: Decide where state lives", "do": "Database, Sharding, Storage, Analytics. Drill daily. Practice: news feed and key-value store."},
+      {"week": 3, "focus": "Arc 3: Move work through the system", "do": "Compute, Messaging, Networking, Real-time. Practice: chat system and notification service."},
+      {"week": 4, "focus": "Arc 4: Keep it alive", "do": "Reliability, Observability, Security, Operations, Testing, Cost. Practice: payment system and ride matching."},
+      {"week": 5, "focus": "Arc 5: Evolve it", "do": "Multi-tenancy, ML, Compliance, Migrations. Turn on the DC Telemetry overlay and reread arcs 2 and 4 through it. Practice: datacenter telemetry and multi-tenant SaaS."},
+      {"week": 6, "focus": "Rehearsal", "do": "One timed practice problem per day, out loud. Drill until every card is in the long-interval box. Reread only the Key Insight and Interview Lens of every lesson."}
+    ]
+  }
+}

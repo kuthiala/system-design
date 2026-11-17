@@ -11,6 +11,9 @@
     "hyper"
   ],
   "short": "Single server → auto-scaling → multi-region active-active — the engine room of your system and the biggest line item on your cloud bill",
+  "tldr": "Compute is where your code runs and the biggest line on the bill. The ladder goes single server, horizontally scaled stateless fleet behind a load balancer, orchestrated containers with autoscaling, and multi-region active-active. The rule at every rung: keep compute stateless so any instance can die at any time.",
+  "keyInsight": "Horizontal scaling only works for stateless processes. The moment a server remembers something between requests (sessions, local files, in-memory caches that matter), it cannot be replaced, and your fleet becomes N single points of failure instead of one resilient pool.",
+  "mentalModel": "A taxi fleet rather than a private chauffeur. Any cab can take any fare because the passenger carries their own luggage (state lives outside compute). You add cabs at rush hour and send them home at midnight (autoscaling). A cab that breaks down is replaced, not repaired at the curb. The depot (load balancer) assigns fares and notices which cabs are not answering.",
   "detail": {
     "what": "The compute layer is the fleet of servers (or containers, or functions) that actually execute your application code — every API handler, every background job, every scheduled task runs here. It encompasses four tightly coupled decisions: (1) the compute abstraction — VMs (full operating system, you manage everything), containers (shared kernel, fast startup, portable across clouds), or serverless functions (you provide code, the platform manages everything else, charged per millisecond of execution); (2) the fleet size at any moment — how many instances are running, governed by autoscaling policies that watch metrics like CPU, memory, request rate, or queue depth; (3) the load balancing layer in front — how incoming traffic is distributed across instances so no single one is overwhelmed and failures are routed around; and (4) the health management system — how unhealthy instances are detected, drained of in-flight requests, and replaced. Think of the compute layer as the engine room of a ship: the database is the cargo hold, the API is the hull, but the compute layer is the engine that actually moves requests from input to output. Every other layer depends on it, and it typically represents 40–70% of your total cloud spend. Getting it wrong means either burning money on idle servers or crashing under load exactly when your users need you most.",
     "why": "Compute decisions have uniquely high leverage because they sit at the intersection of cost, performance, and operational complexity. Over-provisioning by 2× — running twice as many servers as you need — literally doubles your largest cost line item, which for a company spending $100K/month on cloud means $1.2M/year wasted. Under-provisioning means outages exactly when traffic peaks — the moment you have the most users, the most revenue at stake, and the most eyeballs watching. Auto-scaling is the mechanism that resolves this tension, but it's not magic: it has reaction time (how long from 'load increased' to 'new instance serving traffic'), it has policies (what metric triggers scaling, and at what threshold), and it has failure modes (scaling on the wrong metric, scaling too slowly for a spike, scaling down too aggressively into an outage). The compute model also directly gates your deploy velocity — a VM takes 5–10 minutes to provision and boot, a container takes 10–30 seconds, a serverless function takes <1 second. If your deploy pipeline involves provisioning VMs, you ship slowly; if it involves pushing containers, you ship fast; if it involves deploying functions, you ship instantly. This matters because deploy frequency is the single strongest predictor of software quality (per Google's DORA research): teams that deploy many times a day have fewer outages than teams that deploy once a month, because each change is smaller, easier to debug, and faster to rollback. The compute abstraction you choose directly enables or constrains this frequency.",
@@ -168,6 +171,34 @@
       "trap": "Not suitable for: single-instance databases, stateful services without fast recovery, anything where 2-minute drain isn't enough. Always run a mix: 30–40% on-demand (baseline) + 60–70% spot (elastic capacity)"
     }
   },
+  "interview": {
+    "prompt": "'How does this scale?' is usually a compute question before it is a database question.",
+    "senior": "Puts stateless services behind a load balancer, autoscales on CPU, moves sessions to Redis and files to object storage.",
+    "staff": "Starts with statelessness as a discipline and audits for hidden state (local disk, in-memory caches that are not just optimizations, sticky sessions). Picks the compute model by workload shape: serverless for spiky and low-volume, containers for steady, VMs or bare metal for specialized needs. Scales on the right signal (queue depth, in-flight requests, p99 latency) with asymmetric policies (fast up, slow down) and knows the lag between a spike and new capacity, so plans headroom, pre-warming, and load shedding for the gap. Handles graceful shutdown and connection draining so deploys and scale-in are invisible. Puts a number on cost: utilization targets, reserved versus on-demand versus spot mix, and when the platform tax of Kubernetes pays for itself.",
+    "probes": [
+      "Traffic doubles in 90 seconds. Your autoscaler reacts in 3 minutes. What happens in between?",
+      "What state is hiding in your 'stateless' service?",
+      "At what point does Kubernetes pay for itself, and what are you paying before then?"
+    ]
+  },
+  "quiz": [
+    {
+      "q": "Why is CPU usually the wrong autoscaling metric?",
+      "a": "Many workloads are I/O-bound, so CPU stays low while requests pile up waiting on the database or a downstream call. Scale on what users feel: request queue depth, in-flight requests, or p99 latency, with CPU as a secondary guard."
+    },
+    {
+      "q": "What is graceful shutdown and why does it matter for scaling?",
+      "a": "On termination the instance stops accepting new connections, finishes in-flight requests, and only then exits. Without it, every deploy and every scale-in event drops requests mid-flight, which shows up as a small error spike on every release."
+    },
+    {
+      "q": "Why should scale-up and scale-down policies be asymmetric?",
+      "a": "Scaling up late costs you an outage; scaling down late costs you a little money. Scale up fast on a short window and scale down slowly on a long window to avoid flapping and to survive the next wave."
+    },
+    {
+      "q": "What must leave the server for compute to be truly stateless?",
+      "a": "Sessions (to Redis or signed cookies), uploaded files (to object storage), local caches that affect correctness (to a distributed cache), scheduled jobs that assume one instance (to a job scheduler with locking), and logs (to a central sink)."
+    }
+  ],
   "children": [
     {
       "name": "Compute Model",
@@ -182,6 +213,9 @@
         "hyper"
       ],
       "short": "VMs → containers → Kubernetes → serverless — pick the simplest model that serves your scale",
+      "tldr": "VMs give control and cost you operations. Containers give fast, consistent deploys. Kubernetes gives orchestration and costs a platform team. Serverless gives zero idle cost and costs you at sustained scale and in cold starts. Pick the simplest model that serves your scale, and expect to run more than one.",
+      "keyInsight": "Serverless and containers have opposite cost curves. Serverless is nearly free at low volume and ruinous at sustained high volume; containers cost money while idle and get cheaper per request as utilization rises. The crossover point, not ideology, decides.",
+      "mentalModel": "Housing. A VM is a house you own: do anything, fix everything yourself. A container is a furnished apartment: move in fast, same layout everywhere. Kubernetes is the building management company: handles hundreds of apartments, but you now pay management fees even for one. Serverless is a hotel: pay per night, nothing to maintain, and a fortune if you live there year-round.",
       "detail": {
         "what": "The compute model is the abstraction layer between your application code and the physical hardware that runs it. Each model trades off simplicity, cost, control, and startup speed differently. VMs (Virtual Machines, e.g., EC2, GCE): a full operating system per instance — you get root access, can install anything, but boot time is 1–5 minutes and you manage the OS (patches, security, monitoring). This is the 'own a house' model: maximum control, maximum responsibility. Containers (Docker on ECS Fargate, Google Cloud Run, Azure Container Apps): your application packaged with its dependencies into a lightweight image that shares the host OS kernel. Startup in seconds, portable across clouds, and the managed variants (Fargate, Cloud Run) handle all infrastructure. This is the 'rent an apartment' model: less control but someone else fixes the plumbing. Kubernetes: a container orchestrator that manages thousands of containers across a fleet of machines, handling scheduling, scaling, self-healing, service discovery, and rolling deploys. This is the 'apartment building management company' model: enormous power and flexibility, but you need a team to operate it. Serverless (AWS Lambda, Google Cloud Functions, Cloudflare Workers): you provide a function, the platform handles everything else — scaling, availability, patching, even cold start management (with provisioned concurrency). Charged per millisecond of execution. This is the 'hotel room' model: zero maintenance, premium pricing, and you can't rearrange the furniture. The key insight: these models aren't a linear progression — serverless isn't 'better' than containers. Each has a sweet spot defined by your traffic pattern, team size, and budget. Many mature organizations use multiple models simultaneously: serverless for event-driven glue (S3 triggers, webhook handlers), containers for steady-state APIs, and Kubernetes for complex service meshes.",
         "why": "The compute model decision has three dimensions that matter: operational burden (how much time does your team spend on infrastructure vs. features?), cost efficiency (what do you pay per request at your utilization level?), and deployment velocity (how fast can you ship a code change to production?). Serverless wins decisively on operational burden (zero ops — no servers to patch, no autoscaling to configure, no health checks to maintain) and deployment velocity (deploy a function in seconds, scales instantly). But it loses badly on cost at sustained load: at 30% utilization (a typical always-on API), serverless costs 3–5× more than containers; at 80% utilization (a busy service), it costs 5–10× more. The crossover point is roughly 30% utilization — below that, serverless is cheaper because you're not paying for idle time; above that, containers are cheaper because their per-unit cost is lower and you're using what you're paying for. Kubernetes adds another dimension: at >30 services with complex inter-service communication, Kubernetes provides capabilities (service discovery, rolling deploys, health-based traffic routing, resource quotas per team) that would require significant custom engineering on any other platform. But Kubernetes has a steep learning curve (plan 2–4 months for a team to become proficient) and ongoing operational cost (0.5–1 FTE dedicated to platform operations). At <30 services, this cost rarely pays off — ECS or Cloud Run gives you 80% of the benefits at 20% of the complexity.",
@@ -313,6 +347,34 @@
           "action": "Split into multiple K8s clusters (per-region or per-domain) with a fleet management layer. Implement ML-based predictive autoscaling using historical traffic data — start with AWS Predictive Scaling or build a simple Prophet model that forecasts hourly traffic 24 hours ahead. Deploy Karpenter (replaces Cluster Autoscaler) for intelligent node provisioning — it picks the cheapest instance type that fits your pending pods, automatically uses spot with on-demand fallback. Adopt cell architecture: partition users across cells (each cell = independent K8s cluster with its own DB and cache), deploy changes cell-by-cell with automated metrics comparison between canary cell and stable cells. For latency-critical services, provision dedicated bare metal nodes with DPDK networking (achieves <10μs inter-node latency vs. ~100μs on cloud VMs). This level of infrastructure requires a platform engineering team of 5–15 engineers treating the internal infrastructure as a product, with product teams as customers."
         }
       ],
+      "interview": {
+        "prompt": "'Would you use Kubernetes?' or 'Would you use Lambda?' The interviewer is checking that you know what each costs when it is the wrong fit.",
+        "senior": "Compares VMs, containers, Kubernetes, and serverless on operational burden, cost, and startup time, and recommends containers on a managed platform for most workloads.",
+        "staff": "Segments the workload: the steady API tier runs on containers with autoscaling; the spiky image-processing job runs on serverless; the GPU inference service runs on dedicated instances. Explains the cost crossover with numbers (serverless at a few hundred requests per second sustained becomes more expensive than a small container fleet) and the latency cost of cold starts in the user path. Says when Kubernetes is justified (dozens of services, multiple teams, need for standardized deploys and service mesh) and what to use before then (ECS, Cloud Run, a PaaS). Covers the operational details that bite: graceful termination, resource requests and limits, image size and pull time, ARM instances for 20 to 40 percent savings, and spot capacity with interruption handling.",
+        "probes": [
+          "Your Lambda bill tripled. What happened and what would you move off it?",
+          "A team of six wants Kubernetes. What do you tell them and what do you give them instead?",
+          "Where in your design does a cold start sit in the user's request path?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "When does serverless become more expensive than containers?",
+          "a": "At sustained throughput. Serverless bills per invocation and per millisecond at a premium; once a function runs continuously, a container at 60 to 70 percent utilization costs a fraction. The crossover is typically in the low hundreds of requests per second sustained, depending on duration and memory."
+        },
+        {
+          "q": "What is a cold start and how do you keep it out of the user path?",
+          "a": "The latency to provision a new runtime and load code when a function has been idle, from 100ms to several seconds. Keep latency-sensitive paths on always-warm compute, use provisioned concurrency, keep functions small, or move the function behind a queue where latency is invisible."
+        },
+        {
+          "q": "Give three signs that Kubernetes is premature for a team.",
+          "a": "Fewer than about 30 containers, a single team, and no one whose job is to run the cluster. The platform tax (upgrades, networking, RBAC, ingress, monitoring) is paid regardless of size; the benefits only appear with many services and teams."
+        },
+        {
+          "q": "What was the lesson of the Coca-Cola Super Bowl ad on Lambda?",
+          "a": "A workload that is nearly zero all year and enormous for a few minutes is the ideal serverless case: no capacity to pre-provision, no idle fleet to pay for, and scale handled by the platform. The inverse workload, steady and heavy, is the ideal container case."
+        }
+      ],
       "children": []
     },
     {
@@ -328,6 +390,9 @@
         "hyper"
       ],
       "short": "DNS round-robin → L4 → L7 → global anycast — the traffic cop that makes or breaks availability",
+      "tldr": "The load balancer decides which instance gets each request. L4 is fast and protocol-blind; L7 understands HTTP and can route by path, header, or cookie. Health checks, connection draining, and the balancing algorithm determine whether deploys and failures are invisible or visible. Global anycast is the endgame.",
+      "keyInsight": "A load balancer is only as smart as its health check. A check that returns 200 while the database is unreachable keeps sending users to a server that will fail every request. Health must mean 'can serve real traffic', not 'process is alive'.",
+      "mentalModel": "A restaurant host. L4 counts heads and seats parties in rotation. L7 reads the reservation, knows the vegetarian menu is at table nine, and sends the VIP to the quiet room. A good host also notices a server who has stopped bringing food (health check) and stops seating in that section until they are back.",
       "detail": {
         "what": "A load balancer is the traffic cop sitting in front of your fleet of servers. It accepts every incoming request and makes a split-second decision: which backend instance should handle this one? This seemingly simple function is the foundation of high availability, zero-downtime deploys, and horizontal scaling. Load balancers operate at two layers: L4 (transport layer, TCP/UDP) sees only IP addresses and port numbers — it's blazing fast (millions of connections/second per node) but can't make decisions based on HTTP content. L7 (application layer, HTTP/HTTPS) understands the full request — URL path, headers, cookies, request body — and can make intelligent routing decisions: send /api/* to the API fleet, /static/* to the CDN origin, /admin/* to a separate pool. L7 also handles SSL/TLS termination (decrypting HTTPS so backends don't need to), request retry on failure (if one backend returns 503, try another), and response compression. Global load balancers add a geographic dimension: route each user to the nearest regional deployment using GeoDNS (DNS returns different IPs based on requester geography) or anycast (same IP announced from multiple locations via BGP, packets automatically route to nearest). Every production system needs at least one layer of load balancing — it's the single most important piece of infrastructure for turning a collection of fragile servers into a resilient service.",
         "why": "Without a load balancer, your system is as available as your single weakest server. One server crashes = total outage. One server gets slow = all users suffer. A deploy requires taking the entire service down. With a load balancer: a server crash is detected by health checks within 15 seconds and traffic is routed to surviving instances — users may never notice. A slow server is detected by latency-based health checks and gradually removed from rotation. Zero-downtime deploys become trivial: spin up new instances with new code → add to LB → drain old instances (stop sending new requests, wait for in-flight to finish) → terminate old instances. Canary releases become possible: route 1% of traffic to the new version, monitor error rate and latency, gradually increase to 100% or rollback instantly. A/B testing works the same way: route 5% to variant B, measure conversion. The load balancer is the primary mechanism by which a system transitions from 'fragile single point of failure' to 'resilient distributed service.' It's also the first line of defense against DDoS — cloud LBs (ALB, Cloud Load Balancing) absorb volumetric attacks that would overwhelm any single server.",
@@ -454,6 +519,34 @@
           "to": "hyper",
           "trigger": "DNS-based failover TTL adds unacceptable latency (users stuck on a dead endpoint for 60+ seconds), or you need sub-second failover globally, or you need per-PoP traffic management, or your LB itself is becoming a throughput bottleneck",
           "action": "Move to anycast-based global routing (Cloudflare Enterprise, or self-managed BGP with BIRD/FRRouting if you have a network engineering team). Deploy L7 proxy instances (Envoy with xDS control plane) at each PoP for intelligent routing, with configuration pushed in real-time via gRPC xDS protocol (update routing rules across 300 PoPs in <5 seconds). Implement health-aware BGP: each PoP monitors its own health and withdraws its BGP route if unhealthy — traffic automatically shifts to the next-nearest PoP at the network layer in <1 second. This is the architecture of Cloudflare, Fastly, and Google's global load balancer. Time to implement: 3–6 months for the initial deployment, with ongoing network engineering support. For most companies, purchasing this capability from Cloudflare/Fastly is dramatically more cost-effective than building it."
+        }
+      ],
+      "interview": {
+        "prompt": "'Put a load balancer in front' is where most candidates stop. The interviewer asks what it does when a backend is slow, not dead.",
+        "senior": "Uses an L7 load balancer for HTTP routing and TLS termination, round-robin or least connections, with health checks and a managed product like ALB.",
+        "staff": "Picks the layer by need: L4 for raw throughput and non-HTTP protocols, L7 for routing, header-based canaries, and per-route metrics, often both (L4 in front of L7). Chooses least-outstanding-requests over round-robin because request costs are uneven. Designs health checks that exercise dependencies cheaply and uses outlier detection to eject slow instances, not just dead ones. Handles deploys with connection draining and rolling or blue-green rotations. Treats DNS as a slow failover mechanism and uses anycast or a global load balancer for sub-second regional failover. Pre-warms or over-provisions the balancer itself for known spikes because managed balancers scale on a lag. Mentions service mesh for east-west balancing with retries and circuit breaking in the data plane.",
+        "probes": [
+          "One instance is returning 200 on health checks but failing every real request. What do you change?",
+          "Why least-outstanding-requests over round-robin?",
+          "DNS failover with a 60-second TTL: who is still hitting the dead region after 5 minutes, and why?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "Contrast L4 and L7 load balancing.",
+          "a": "L4 operates on TCP/UDP, forwards packets without parsing them, and is fast and protocol-agnostic. L7 terminates HTTP, can route by path, host, header, or cookie, do TLS termination, and emit per-route metrics, at the cost of more CPU per request. Many deployments run L4 in front of L7."
+        },
+        {
+          "q": "Why is round-robin a poor choice for uneven workloads?",
+          "a": "It assigns equal counts regardless of cost, so an instance handling a few slow requests keeps receiving more while idle instances wait. Least-outstanding-requests sends each new request to the instance with the fewest in flight, which naturally routes around slow nodes."
+        },
+        {
+          "q": "What makes a health check useful rather than decorative?",
+          "a": "It must verify the instance can serve real traffic: dependencies reachable, warmed caches, not shutting down. Combine a cheap liveness check with a deeper readiness check, and add passive outlier detection that ejects instances with rising error rates or latency."
+        },
+        {
+          "q": "Why is DNS a bad failover mechanism?",
+          "a": "Resolvers and clients cache records beyond the TTL, some ignore TTLs entirely, and browsers pin connections. After a failover, a long tail of users keeps hitting the dead endpoint for minutes to hours. Anycast or a global load balancer with health-based routing fails over in seconds."
         }
       ],
       "children": []

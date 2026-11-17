@@ -11,6 +11,7 @@
     "hyper"
   ],
   "short": "Inference serving · vector DBs · LLM gateways · training infra — a parallel universe of cost and complexity sitting alongside your transactional stack",
+  "tldr": "ML is a second system beside your transactional one, with its own scaling laws (GPU hours), failure modes (drift, hallucination, prompt injection), and operations (MLOps). Start with hosted APIs, self-host inference when spend or latency forces it, and treat vector search, serving, and training as distinct infrastructure problems.",
   "keyInsight": "ML infrastructure is not a feature bolted onto your app — it is a second, parallel system with its own scaling laws, its own cost model (GPU-hours not CPU-hours), its own failure modes (model drift, prompt injection, hallucination), and its own operational discipline (MLOps). Treating it as 'just another microservice' leads to either runaway costs or broken SLOs. The single most important decision is the build-vs-buy boundary: hosted APIs (OpenAI, Anthropic) are 10–100× more expensive per token than self-hosted at scale, but they require zero GPU expertise, zero infrastructure, and ship in an afternoon. Self-hosting (vLLM on your own GPUs) inverts that: 10–100× cheaper per token at volume, but requires GPU procurement (6–12 month lead times for H100s), CUDA expertise, model optimization, and 24/7 on-call for a fleet of temperamental accelerators. The crossover point — where self-hosting becomes cheaper than APIs — is typically $5K–$50K/month in API spend, depending on your utilization and model size.",
   "mentalModel": "Think of ML infrastructure as a restaurant kitchen. Hosted APIs (OpenAI) are like ordering DoorDash — expensive per meal, zero kitchen investment, instant availability, but you eat whatever the restaurant serves. Self-hosted inference (vLLM on your GPUs) is like building your own kitchen — massive upfront investment, ongoing maintenance (cleaning, restocking, equipment repair), but once running, each meal costs a fraction and you control the menu. The 'kitchen' analogy extends: you need specialized equipment (GPUs = commercial ovens), specialized staff (ML engineers = trained chefs), and the economics only work at volume (a family of 2 should order DoorDash; a cafeteria serving 500 lunches/day needs its own kitchen). Most companies start with DoorDash and graduate to their own kitchen as volume grows.",
   "detail": {
@@ -123,6 +124,34 @@
       "action": "Build a custom inference and training platform. (1) Custom inference stack: replace vLLM's default attention with FlashAttention-3 (2× faster attention), implement speculative decoding with a small draft model (2–3× overall speedup), use FP8 quantization on H100s (2× throughput with negligible quality loss via HF's Quanto or TensorRT-LLM). (2) Disaggregate prefill and decode: separate the 'prefill' phase (processing input prompt, compute-heavy) from the 'decode' phase (generating tokens, memory-bandwidth-heavy) onto different GPU pools optimized for each. Mooncake (from Moonshot AI) and Sarathi (from Microsoft) pioneered this pattern for 30–50% cost reduction. (3) Model distillation pipeline: train smaller (7B–13B) task-specific models by distilling from your best large model's outputs on your specific data. Achieves 90%+ quality of the teacher at 1/10th the inference cost. (4) Multi-GPU sharding: tensor parallelism (split layers across GPUs) + pipeline parallelism (split model stages across GPUs) for models >70B. Use Megatron-LM or DeepSpeed for distributed training; TensorRT-LLM for inference. (5) Build or procure a dedicated GPU cluster: at $50K+/mo in cloud GPU costs, colocation (your GPUs in a datacenter) saves 50–70% over 3 years. Lead times for H100 clusters are 3–12 months. CoreWeave, Lambda Labs, and Together AI offer GPU cloud at 30–50% below hyperscaler pricing. (6) Training infrastructure: SLURM for job scheduling, RDMA/InfiniBand networking between GPUs (100Gbps+), distributed checkpointing, automated hyperparameter search."
     }
   ],
+  "interview": {
+    "prompt": "'Add an AI feature' is now a common twist on a classic design. The interviewer wants to see you treat it as infrastructure with costs, not magic.",
+    "senior": "Calls a hosted LLM API from a service, adds a vector database for RAG, caches responses, and mentions rate limits and fallbacks.",
+    "staff": "Frames the economics first: tokens per request, requests per day, cost per million tokens, and the point at which self-hosting on GPUs wins. Designs an LLM gateway that routes by task to the cheapest adequate model, caches by semantic similarity, enforces per-tenant budgets, and falls back across providers. Treats model output as untrusted input: schema validation, guardrails, human review for high-stakes actions, and prompt injection as a security boundary. For RAG, designs chunking, embedding versioning, hybrid search, and re-ranking, and plans the re-embedding migration when the model changes. For serving, discusses batching, KV cache, quantization, and GPU utilization as the primary metric. Builds evaluation and monitoring (quality drift, latency, cost per feature) because the model will change under you.",
+    "probes": [
+      "At what monthly spend does self-hosting an open model beat the API, and what does self-hosting cost you in people?",
+      "A user pastes 'ignore previous instructions' into the support bot. What stops that from mattering?",
+      "You upgrade the embedding model. What happens to the 50 million vectors you already have?"
+    ]
+  },
+  "quiz": [
+    {
+      "q": "Why should an LLM gateway sit between your services and model providers?",
+      "a": "It centralizes routing by task to the cheapest capable model, caching, rate limiting and budgets per tenant, fallbacks across providers, observability of tokens and cost, and prompt and response logging for evaluation. Without it every team reimplements these and nobody can see the bill."
+    },
+    {
+      "q": "What is prompt caching and why does it change the cost model?",
+      "a": "Providers can reuse the processed state of a repeated prompt prefix (system prompt, long documents), charging a fraction for cached tokens. If your requests share a large prefix, structuring prompts for cache hits can cut cost and latency several-fold."
+    },
+    {
+      "q": "Why must LLM output be treated as untrusted?",
+      "a": "It is non-deterministic, can be manipulated by injected instructions in user or retrieved content, and will confidently fabricate. Validate structure against a schema, constrain actions with allow-lists, require confirmation for consequential operations, and never let model output become executed code or queries without checks."
+    },
+    {
+      "q": "What is the single most important metric for self-hosted inference?",
+      "a": "GPU utilization. GPUs are the dominant cost, and a naive server runs one request at a time at 5 to 20 percent utilization. Continuous batching, KV cache reuse, and right-sized models push utilization up and cost per token down by an order of magnitude."
+    }
+  ],
   "children": [
     {
       "name": "Model Serving",
@@ -137,7 +166,9 @@
         "hyper"
       ],
       "short": "Hosted API → vLLM → custom serving stack — the infrastructure that turns a trained model into a production endpoint",
+      "tldr": "Serving turns weights on disk into a production endpoint. Hosted APIs first; vLLM or TensorRT-LLM on your own GPUs when spend or latency demands; custom stacks at extreme scale. Continuous batching, KV cache, quantization, and speculative decoding are the levers; GPU utilization is the scoreboard.",
       "keyInsight": "The gap between 'model works in a notebook' and 'model serves 10K users reliably' is enormous. A raw PyTorch model wrapped in Flask wastes 80–95% of GPU compute because it processes one request at a time. Production serving infrastructure (vLLM, TensorRT-LLM, Triton) uses continuous batching (dynamically grouping concurrent requests into a single GPU forward pass), PagedAttention (managing GPU memory like virtual memory pages to avoid fragmentation), and quantization (reducing numerical precision from FP16 to INT8/FP8/INT4 to double or quadruple throughput with minimal quality loss). These optimizations aren't nice-to-haves — they're the difference between $30K/month and $3K/month for the same workload.",
+      "mentalModel": "A bus versus a taxi. A naive model server is a taxi: one passenger per trip, the engine mostly idle. Continuous batching is a bus that picks up and drops off riders while moving, so the expensive engine (the GPU) is always full. KV cache is remembering the route you already drove so you do not re-drive it for each new rider who boards mid-route.",
       "detail": {
         "what": "Model serving is the infrastructure that takes a trained model (weights on disk) and serves predictions at production latency, throughput, and reliability. It solves five problems that don't exist in a notebook: (1) Cold start — loading a 70B model into GPU memory takes 30–120 seconds. You can't autoscale to zero for latency-sensitive endpoints. (2) Batching — a GPU processes a batch of 32 requests in roughly the same time as a batch of 1, because LLM inference is memory-bandwidth-bound, not compute-bound. Continuous batching (adding new requests to an in-progress batch as slots free up, rather than waiting for the entire batch to complete) increases throughput 3–10× over static batching. (3) Memory management — an LLM's KV cache (the intermediate state that grows with each generated token) consumes 50%+ of GPU memory. PagedAttention (from the vLLM paper) manages this like OS virtual memory, eliminating fragmentation and allowing 2–4× more concurrent requests. (4) Tail latency — output length varies wildly (a yes/no answer generates 3 tokens; a code explanation generates 2,000). Long outputs hold GPU slots, creating head-of-line blocking. Preemption (pausing long requests to serve short ones) keeps p99 latency bounded. (5) Multi-model serving — running multiple models on the same GPU pool, routing requests by model, and packing smaller models onto shared GPUs to maximize utilization.",
         "why": "The economics are brutal: an H100 GPU costs $3–5/hour whether it's processing 1 request or 100. Naive serving (Flask + PyTorch, one request at a time) achieves ~3–5 QPS on a 70B model — that's $0.70–1.60 per request at $4/hr. Optimized serving (vLLM with continuous batching, FP8 quantization) achieves 50–150 QPS on the same hardware — $0.03–0.08 per request. That's a 10–20× cost difference from software optimization alone, no hardware change. For a service handling 1M requests/day, the difference is $30K/month vs $700K/month. This is why model serving infrastructure is the highest-leverage investment in any ML system. Additionally, production serving must handle failures gracefully: GPU out-of-memory crashes (models OOM when KV cache exceeds VRAM), CUDA errors (non-recoverable, require process restart), and model loading failures (corrupted weights, incompatible versions). Your serving infrastructure must watchdog these, auto-restart, and route traffic away from unhealthy replicas — all invisible to the user.",
@@ -271,6 +302,34 @@
           "desc": "Code completion in an IDE must be near-instant (<200ms) to feel helpful rather than intrusive. Copilot uses speculative decoding: a fast, small model generates 5–10 candidate tokens, the large model verifies them in one pass. Since code is highly predictable (lots of boilerplate, patterns, variable name repetitions), the draft model matches 70–80% of tokens, yielding ~2.5× speedup. Combined with aggressive caching of partial completions (if the user continues typing what was predicted, serve from cache), Copilot achieves sub-200ms latency for most suggestions."
         }
       ],
+      "interview": {
+        "prompt": "'Latency is 3 seconds per LLM response and the GPU bill is huge.' The interviewer wants the levers, in order of impact.",
+        "senior": "Proposes batching requests, using a smaller or quantized model, caching common responses, and autoscaling GPU nodes.",
+        "staff": "Measures first: tokens per second per GPU, time to first token, utilization. Then pulls levers by impact: continuous batching and paged KV cache via vLLM for several-fold throughput, prompt caching for shared prefixes, quantization (INT8, FP8) for memory and speed with measured quality loss, speculative decoding for latency, and routing easy requests to small models. Designs around cold starts: no scale-to-zero on latency-sensitive paths, model weights on fast local storage, warm pools. Separates streaming for interactive use from batch for offline. Sets SLOs on time to first token and inter-token latency rather than total time. Plans capacity in GPU hours and knows the price difference between on-demand and reserved accelerators.",
+        "probes": [
+          "What does a 70B model need in GPU memory, and how does quantization change that?",
+          "Why is time to first token the SLO rather than total latency?",
+          "A cold start takes 90 seconds. Where does that sit in your autoscaling plan?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "What is continuous batching and why does it matter?",
+          "a": "Instead of waiting for a batch to fill and finishing all sequences together, the server admits new requests as others finish token by token, keeping the GPU saturated. It raises throughput several-fold over naive serving with little latency cost."
+        },
+        {
+          "q": "What is the KV cache and what problem does prefix sharing solve?",
+          "a": "During generation the attention keys and values for every previous token are cached so each new token does not recompute them. If many requests share a prefix (a long system prompt), that prefix's cache can be computed once and shared, cutting both compute and memory."
+        },
+        {
+          "q": "Why does output token blow-up hurt more than input size?",
+          "a": "Input tokens are processed in parallel in one pass; output tokens are generated one at a time, each a full forward pass. A response that is 10x longer costs roughly 10x the GPU time and latency. Cap max tokens and design prompts for concise outputs."
+        },
+        {
+          "q": "How did Character.AI cut inference cost 33x?",
+          "a": "Largely by sharing and compressing KV cache across turns and users with shared prefixes, plus architectural changes to reduce attention memory. The lesson: memory bandwidth and cache reuse, not raw FLOPs, dominate serving cost."
+        }
+      ],
       "related": [
         {
           "id": "ml-vector",
@@ -300,6 +359,7 @@
         "hyper"
       ],
       "short": "pgvector → dedicated → sharded ANN at scale — the index that makes AI search possible",
+      "tldr": "A vector database is an approximate nearest-neighbor index over embeddings. Start with pgvector inside Postgres; move to a dedicated engine past a few million vectors or when hybrid search and filtering demand it. Recall, latency, and memory trade against each other, and the embedding model version is part of your schema.",
       "keyInsight": "A vector database is not a traditional database — it's a specialized index for similarity search in high-dimensional space. When you convert text, images, or audio into embedding vectors (arrays of 768–3072 floating-point numbers), a vector DB lets you find the 'most similar' items in milliseconds. The core algorithm is HNSW (Hierarchical Navigable Small World): imagine a multi-layered skip list where each layer is a graph connecting similar items. Searching starts at the top (sparse, coarse) layer and descends through increasingly dense layers, narrowing the candidate set at each level. This gives O(log N) search time instead of O(N), making it feasible to search 100M vectors in <50ms.",
       "mentalModel": "Think of a vector database like a library organized by meaning, not by title. In a traditional library (SQL database), books are indexed by title, author, and ISBN — exact lookups. In a vector library, books are arranged so that books about similar topics are on nearby shelves. When you ask 'find me books about the French Revolution's economic impact,' the librarian doesn't search by exact title — she walks to the 'European history' section, then to the 'economics' sub-section, and grabs the 10 nearest books. That spatial arrangement IS the vector index, and the 'walking' is the ANN search algorithm.",
       "detail": {
@@ -423,6 +483,34 @@
           "desc": "Spotify uses Vespa (Yahoo's search platform) for combining vector similarity search (find podcasts with similar audio/text embeddings) with structured filtering (language, genre, region) and business rules (freshness boost, diversity requirements). Vespa's strength is this multi-signal ranking — pure vector DBs struggle with the complex ranking logic that real recommendation systems require."
         }
       ],
+      "interview": {
+        "prompt": "'Add semantic search' or 'build RAG' puts the vector store on the table, and the interviewer wants to know what breaks at 100 million vectors.",
+        "senior": "Embeds documents with a model, stores vectors in pgvector or Pinecone, queries by cosine similarity, and returns the top k to the LLM.",
+        "staff": "Starts with chunking strategy because retrieval quality is decided there, then picks the index (HNSW for recall and speed in memory, IVF or disk-based for scale) and states the recall target. Combines vector search with keyword search (BM25) and metadata filters, and knows that pre-filtering versus post-filtering changes recall dramatically. Treats the embedding model version as schema: stores it with each vector, plans re-embedding as a migration with dual indexes, and budgets the cost. Sizes memory honestly (vectors times dimensions times 4 bytes plus index overhead) and uses quantization to fit. Adds a re-ranker for quality and caches frequent queries. Starts on pgvector and names the trigger for moving: latency over 100ms at p99, more than a few million vectors, or hybrid search the database cannot do.",
+        "probes": [
+          "How much memory do 100 million 1536-dimension vectors need, and how do you shrink it?",
+          "A filter 'where tenant = X' matches 0.1 percent of vectors. What happens to recall with post-filtering?",
+          "You change the embedding model. Walk me through the migration."
+        ]
+      },
+      "quiz": [
+        {
+          "q": "Estimate the memory for 100M vectors of 1536 float32 dimensions.",
+          "a": "100M times 1536 times 4 bytes is about 614GB before index overhead, which with HNSW adds a large fraction more. Product quantization or scalar quantization can cut this 4 to 32x at some recall cost; this is why dimension choice and quantization matter."
+        },
+        {
+          "q": "What is the filter explosion problem in vector search?",
+          "a": "If you search first and filter after, a selective filter discards most of the top-k results, so recall collapses. If you filter first, the index may not support it efficiently. Engines solve it with filtered HNSW traversal or partitioned indexes per tenant; you must know which your engine does."
+        },
+        {
+          "q": "Why is chunking strategy more important than the vector database choice?",
+          "a": "The embedding represents the chunk; a chunk too large dilutes meaning, too small loses context, and bad boundaries split facts. Retrieval returns chunks, so their size and overlap determine whether the LLM sees the right evidence. No index fixes bad chunks."
+        },
+        {
+          "q": "Why must the embedding model version be stored with each vector?",
+          "a": "Vectors from different models live in different spaces and cannot be compared. When you upgrade the model, every vector must be regenerated; tagging versions lets you dual-index, migrate gradually, and never mix spaces in one query."
+        }
+      ],
       "related": [
         {
           "id": "db-search",
@@ -447,7 +535,9 @@
         "hyper"
       ],
       "short": "Notebook → pipelines → distributed training — closing the gap between 'works on my laptop' and 'works in production'",
+      "tldr": "The gap between a notebook and production is a pipeline: data validation, feature computation that matches serving, versioned training, evaluation gates, registry, deployment, and monitoring for drift. Fine-tune before you train from scratch; manage features so training and serving see the same values.",
       "keyInsight": "Most ML projects don't fail because the model is bad — they fail in the gap between notebook and production. The model works beautifully in Jupyter with clean data and manual steps. In production, it needs: automated data pipelines (that handle schema changes, late-arriving data, and corrupt records), feature engineering (that produces the same features at training time and serving time — 'training-serving skew' is the silent killer of ML quality), experiment tracking (which hyperparameters and data version produced which model), automated retraining (when the world changes and the model's accuracy drifts), and safe deployment (A/B testing, canary rollouts, instant rollback). MLOps is the discipline that closes this gap — it's DevOps for machine learning, with the added complexity that ML has two artifacts to version (code AND data/models), and correctness is probabilistic (no unit test can catch a 2% accuracy regression).",
+      "mentalModel": "A restaurant moving from a chef's home kitchen to a chain. The recipe (model) worked once with hand-picked ingredients (clean notebook data). A chain needs a supply chain that rejects bad produce (data validation), a prep station that cuts vegetables identically every day (feature store), a tasting panel before any dish ships (evaluation gates), and a way to pull a dish when customers stop ordering it (drift monitoring).",
       "detail": {
         "what": "The pipelines and infrastructure that take raw data and produce deployed, monitored production models. The ML lifecycle has distinct phases, each requiring different infrastructure: (1) Data engineering: collecting, cleaning, and transforming raw data into training datasets. Often 60–80% of total ML effort. (2) Feature engineering: computing the input features the model uses. Critical that training features and serving features are computed identically ('feature store' pattern). (3) Experiment tracking: recording every training run's hyperparameters, data version, code version, metrics, and artifacts. Without this, reproducing a result is impossible. (4) Model training: the actual computation — gradient descent, backpropagation, loss optimization. For LLMs, this involves distributed training across multiple GPUs with specialized parallelism strategies. (5) Evaluation: testing model quality on held-out data, comparing against the production baseline, checking for bias and edge cases. (6) Deployment: moving the trained model into serving infrastructure with canary rollout, monitoring, and rollback capability. (7) Monitoring: tracking model performance in production — not just system metrics (latency, errors) but model metrics (prediction quality, drift, data distribution changes). When drift exceeds a threshold, trigger automated retraining.",
         "why": "The cost of the gap between notebook and production is measured in months of wasted effort. A typical failure pattern: data scientist trains a model in a notebook, emails the weights to an engineer, engineer wraps it in a Flask API, deploys to production. Six months later, the model's accuracy has degraded by 15% because the input data distribution shifted (users changed behavior, a new product category was added) and nobody noticed because there's no monitoring. The data scientist can't reproduce the original training because the notebook has been modified 47 times and the original training data was overwritten. Retraining from scratch takes 3 weeks because there's no automated pipeline. Meanwhile, users are seeing bad recommendations and churning. MLOps prevents this entire class of failure by automating the pipeline, versioning everything, monitoring continuously, and retraining automatically.",
@@ -525,6 +615,62 @@
           "to": "hyper",
           "trigger": ">100 models OR training own foundation models OR ML infra cost >$500K/year",
           "action": "Build an ML platform. (1) Establish a dedicated ML platform team (1 platform engineer per 5–8 ML engineers). Their product: a self-service platform where ML engineers can launch training jobs, register models, deploy to serving, and monitor — without touching infrastructure. (2) Provision a GPU cluster: for training budgets >$50K/month, colocation (your GPUs in a datacenter) saves 50–70% vs cloud over 2–3 years. An 8×H100 DGX node costs ~$250K to buy and ~$3K/month to host, vs ~$30K/month to rent in the cloud. Lead time: 3–12 months for H100s. Interim: use GPU cloud providers (CoreWeave, Lambda Labs) at 30–50% below AWS/GCP pricing. (3) Deploy SLURM for cluster job scheduling (the standard in ML). Ray can layer on top for more Pythonic job submission. (4) Implement distributed checkpointing and elastic training (jobs can resume after GPU failures without restarting from scratch). (5) Build a fine-tuning pipeline as a self-service product: ML engineers upload a dataset, specify a base model and hyperparameters, and the platform handles LoRA training, evaluation, model registration, and shadow deployment. This turns weeks of per-model work into hours."
+        }
+      ],
+      "pitfalls": [
+        {
+          "name": "Training-serving skew",
+          "desc": "Features are computed one way in the training pipeline (a batch SQL job over a warehouse) and another way at serving time (application code against a live database). The two drift apart subtly: different null handling, different time windows, a timezone bug. The model performs beautifully offline and poorly online, and nobody can reproduce the gap. The fix is a single feature definition executed in both paths, which is the core reason feature stores exist."
+        },
+        {
+          "name": "No evaluation gate before deploy",
+          "desc": "A retrained model is promoted because the pipeline succeeded, not because it is better. Metrics on a held-out set, a comparison against the current champion, and slice-level checks (does it still work for the smallest customer segment?) must gate promotion. Without a gate, every retrain is a silent production change with no review."
+        },
+        {
+          "name": "Silent drift",
+          "desc": "The world changes (new product mix, a pandemic, a UI change that alters user behavior) and the model's inputs no longer look like its training data. Accuracy decays over weeks with no error thrown. Monitor input distributions and prediction distributions against training baselines and alert on divergence; schedule retraining on a cadence tied to how fast the domain moves."
+        },
+        {
+          "name": "Manual retraining as a heroic act",
+          "desc": "Retraining requires one engineer who knows the notebook, the right data snapshot, and the GPU quota. When they leave or go on holiday, the model freezes. Retraining must be a pipeline anyone can trigger and that can be scheduled, with lineage from data snapshot to model artifact."
+        }
+      ],
+      "examples": [
+        {
+          "name": "Uber's Michelangelo",
+          "desc": "Uber built a single platform for the full ML lifecycle: a feature store shared between training and serving, managed training on a cluster, a model registry, and serving with monitoring. The motivation was exactly training-serving skew and the cost of every team rebuilding the same pipeline. Thousands of models run on it, from ETA prediction to fraud detection."
+        },
+        {
+          "name": "Netflix's experimentation-driven retraining",
+          "desc": "Recommendation models are retrained continually and promoted only after offline metrics and online A/B tests show improvement over the champion. The pipeline, not an engineer, decides. This made the recommender a product that improves weekly rather than a project that shipped once."
+        }
+      ],
+      "interview": {
+        "prompt": "'How do you keep the model good over time?' separates candidates who have shipped ML from those who have called an API.",
+        "senior": "Describes a training pipeline with versioned data, a model registry, automated retraining on a schedule, and monitoring of accuracy in production.",
+        "staff": "Designs the pipeline as a product: data validation at ingestion (schema, ranges, freshness), a feature store that serves the same definitions to training and inference, experiment tracking and lineage, evaluation gates with slice metrics and a champion-challenger comparison, and canary deployment of models with shadow scoring. Monitors drift on inputs and outputs, not just accuracy, because labels arrive late. Decides fine-tune versus train from scratch by data volume and budget, and online versus batch features by freshness need. Plans GPU capacity (spot for training, reserved for serving) and cost per training run. Knows the organizational failure mode: a platform team that builds for hypothetical models instead of the three that matter.",
+        "probes": [
+          "Your offline accuracy is 95 percent and online is 80 percent. List the causes in order of likelihood.",
+          "Labels arrive two weeks after predictions. How do you detect a bad model in the first day?",
+          "When would you train a model from scratch instead of fine-tuning?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "What is a feature store and what problem does it solve?",
+          "a": "A system that defines features once and serves them to both training (batch, historical) and inference (online, low latency) with the same computation. It solves training-serving skew and lets teams share features instead of recomputing them."
+        },
+        {
+          "q": "What should gate a model's promotion to production?",
+          "a": "Offline metrics on a held-out set, comparison against the current production model (champion-challenger), slice-level metrics for important segments, and ideally a shadow or canary run in production. Pipeline success alone is not a gate."
+        },
+        {
+          "q": "How do you detect drift when ground-truth labels arrive late?",
+          "a": "Monitor the distributions of input features and of predictions against training-time baselines using statistical distance measures, and alert when they diverge. Distribution shift shows up immediately even though accuracy cannot be computed until labels land."
+        },
+        {
+          "q": "Fine-tune or train from scratch: what decides?",
+          "a": "Data volume and task distance. With thousands to a few million examples and a task similar to what a base model knows, fine-tuning is faster, cheaper, and better. Training from scratch needs orders of magnitude more data and compute and is justified only when no base model covers the domain."
         }
       ],
       "related": [

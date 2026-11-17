@@ -11,6 +11,9 @@
     "hyper"
   ],
   "short": "Protocol, gateway, versioning, rate limiting — your API is the contract you'll live with the longest",
+  "tldr": "Your API is the contract you will live with longest. Four decisions compound: wire protocol, gateway, versioning, and rate limiting. Get idempotency, pagination, versioning, and error codes right on day one, because changing them later means changing every client you do not control.",
+  "keyInsight": "Every API decision has a hidden multiplier: the number of clients you cannot update. Internal APIs can be fixed in a day. A public API mistake lives for a decade because Twitter cannot force every app to upgrade.",
+  "mentalModel": "A contract with the outside world written in a language you cannot revise once signed. Add clauses (new fields, new endpoints) freely; strike clauses (removing or renaming) only through a formal, versioned renegotiation. The gateway is the front desk that checks ID, counts visits, and routes to the right office.",
   "detail": {
     "what": "The API layer is the contract surface between your system and everything that consumes it: web and mobile clients, partner integrations, third-party developers, internal services, and even future systems you haven't imagined yet. It encompasses four critical decisions that compound over time. (1) Wire protocol: REST (HTTP+JSON — universally understood, tooling everywhere), GraphQL (HTTP+JSON with a query language — clients request exactly the shape of data they need in a single round trip), gRPC (HTTP/2+Protobuf — binary, fast, code-generated clients with type safety), or WebSocket (persistent bidirectional connection for real-time push). Most mature systems use a mix: REST or GraphQL for external clients, gRPC for internal service-to-service, WebSocket for live features. (2) Gateway/edge layer: the single front door that handles cross-cutting concerns — authentication, rate limiting, SSL termination, request routing, logging, request transformation — so that each downstream service doesn't have to reimplement them. (3) Versioning strategy: how you evolve the API over time without breaking existing consumers. This is the decision you'll regret most if you skip it. (4) Contract style: naming conventions, pagination approach, error format, filtering/sorting patterns, and idempotency behavior that make the API predictable and self-consistent. Together, these four dimensions determine how easy your system is to integrate with, how resilient it is to change, and how much technical debt accumulates in your client applications. A well-designed API is a force multiplier — every team that integrates with it moves faster. A poorly designed one is a tax on every consumer, forever.",
     "why": "API decisions are uniquely sticky — stickier than database choices, stickier than language choices, stickier than architecture choices. Why? Because a public API has external consumers you cannot control. Once a mobile app with your v1 API is in the App Store, 20–30% of users will still be running that app version 6+ months later. Partner integrations are even stickier — a B2B customer who spent 3 months integrating your API into their ERP system will not happily re-integrate when you ship breaking changes. Third-party developers who built businesses on your API (think Twitter's early ecosystem) will revolt or die. This means a v1 mistake might live for 5–10 years. Getting the protocol right (do we need GraphQL's flexibility or is REST sufficient?), the versioning right (URL path vs header vs query param — each has different caching and routing implications), and the contract style right (consistent error codes, pagination, idempotency) at the start saves enormous pain later. Get it wrong and you face a brutal choice: break consumers (losing trust, partners, and revenue) or maintain old API versions alongside new ones indefinitely (paying double the testing, documentation, and maintenance cost). The most successful APIs in the industry — Stripe, Twilio, GitHub — all share one trait: their designers spent disproportionate time on API design relative to implementation, because they understood that the API surface is the product for developers. Stripe's API is so well-designed that it's frequently cited as the reason companies choose Stripe over competitors, even when competitors offer lower fees. That's the compound interest of good API design.",
@@ -110,6 +113,34 @@
       "action": "Move ultra-hot internal paths to custom binary protocols — FlatBuffers (zero-copy deserialization, no parsing step — used by Google for performance-critical paths) or Cap'n Proto (similar zero-copy approach) for paths where even Protobuf's decode time matters. Deploy HTTP/3 (QUIC) at the edge for client-facing APIs — it eliminates TCP head-of-line blocking and saves one RTT on connection establishment, which is a 10–30% improvement on mobile networks. For the highest-throughput paths, consider stateful persistent connections (custom protocol over TCP/QUIC) where the connection setup overhead of per-request HTTP is measurable. How to do it concretely: profile your API request lifecycle end-to-end to identify where time is actually spent (serialization? network? auth? routing?). For hot paths, replace Protobuf with FlatBuffers — the difference is FlatBuffers accesses serialized data in-place without a decode step, eliminating ~1–3ms of CPU per request at high throughput. For HTTP/3, enable it at your CDN/edge layer (Cloudflare supports it natively; Fastly supports it; AWS CloudFront has partial support) — clients that support QUIC will auto-negotiate. Internally, evaluate whether gRPC over QUIC (experimental but emerging) reduces tail latency on lossy internal networks."
     }
   ],
+  "interview": {
+    "prompt": "'Define the API.' Many candidates list endpoints. The interviewer is looking for the cross-cutting decisions that make an API survivable.",
+    "senior": "Lists resources and verbs, picks REST with JSON, mentions pagination, authentication, and versioning in the URL.",
+    "staff": "Designs the few endpoints that matter and then spends time on the properties that outlast them: idempotency keys on every mutating call, cursor pagination from day one, machine-readable error codes, additive-only evolution with explicit deprecation windows, and consistent naming. Chooses protocol per consumer: REST for the public, gRPC between services, WebSocket or SSE for push. Puts auth, rate limiting, and observability at the gateway and keeps business logic out of it. Talks about the lifecycle: how a field gets deprecated, how you measure who still uses v1, and how you shut it down without an outage.",
+    "probes": [
+      "A client retries a POST after a timeout. How do you guarantee it does not create two orders?",
+      "You need to rename a field used by 10,000 integrations. Walk me through it.",
+      "Why cursor pagination instead of offset?"
+    ]
+  },
+  "quiz": [
+    {
+      "q": "How do idempotency keys work and why does every mutating endpoint need one?",
+      "a": "The client sends a unique key per logical operation; the server stores the key with the result and returns the stored result on retries. Networks fail after the server commits but before the client hears back, so clients must retry, and without idempotency every retry risks a duplicate charge or order."
+    },
+    {
+      "q": "Why does offset pagination break at scale, and what replaces it?",
+      "a": "OFFSET 100000 makes the database scan and discard 100,000 rows, so later pages get slower and results shift when rows are inserted. Cursor (keyset) pagination passes the last seen sort key and uses an index seek, giving constant cost per page and stable results."
+    },
+    {
+      "q": "What is the additive-only rule for API evolution?",
+      "a": "You may add fields, endpoints, and optional parameters at any time; you may never remove, rename, or change the meaning of an existing field within a version. Breaking changes get a new version with a deprecation window and usage metrics so you can see when it is safe to retire the old one."
+    },
+    {
+      "q": "Why should errors carry a machine-readable code rather than only a message?",
+      "a": "Clients branch on errors. If the only signal is a human sentence, they string-match on it, and your next wording change breaks their retry logic. A stable code (insufficient_funds, rate_limited) plus a human message plus a request id lets clients handle errors reliably and lets you change copy freely."
+    }
+  ],
   "children": [
     {
       "name": "Protocol Selection",
@@ -124,6 +155,9 @@
         "hyper"
       ],
       "short": "REST vs GraphQL vs gRPC vs WebSocket — each solves a different problem, and mixing is normal",
+      "tldr": "REST is the universal default. gRPC wins for internal service-to-service calls where latency and typed contracts matter. GraphQL solves the specific problem of many clients needing different shapes of the same data. WebSocket and SSE are for push. Mixing them by consumer is normal; choosing one for everything is not.",
+      "keyInsight": "Protocol choice is about who the consumer is and what tooling they have, not about performance benchmarks. gRPC's speed is worthless to a browser that cannot speak it; GraphQL's flexibility is a liability if you have one client and one team.",
+      "mentalModel": "Languages at a border. REST is English: everyone speaks a little, every sign is in it. gRPC is the shorthand two colleagues develop after years of working together: dense, fast, useless to outsiders. GraphQL is a waiter who lets each diner compose their own plate, wonderful for a varied crowd and chaos if someone orders the entire menu.",
       "detail": {
         "what": "The wire protocol and serialization format that your API speaks. This isn't a religious choice — it's a technical one driven by your consumer needs, latency budget, and operational maturity. REST (HTTP/1.1 or HTTP/2 + JSON): the lingua franca of web APIs. Every language, framework, proxy, CDN, browser, and debugging tool speaks REST. The request/response model is simple: verb + URL + JSON body. The downside is rigidity — each endpoint returns a fixed shape, so clients often get too much data (over-fetching: you need the user's name but get 50 fields) or too little (under-fetching: you need the user + their orders + their reviews, requiring 3 separate requests). GraphQL (HTTP + JSON with a query language): Facebook's response to the over-/under-fetching problem. The client sends a query describing exactly what data it needs; the server resolves it and returns exactly that shape. One round trip for complex, nested data. Extraordinary for mobile apps on slow networks where round trips are expensive. The downside: you've given clients a query language, which means they can construct pathologically expensive queries if you don't add safeguards. gRPC (HTTP/2 + Protocol Buffers): Google's RPC framework. Messages are defined in .proto files, then code-generated into strongly-typed client and server stubs in 10+ languages. Protobuf binary serialization is 5–10× smaller than equivalent JSON and 3–5× faster to parse. HTTP/2 multiplexing means many concurrent requests over one connection. The downside: binary payloads are not human-readable (you can't debug with curl easily), browser support is poor (gRPC-Web exists but adds complexity), and many CDNs/proxies don't handle HTTP/2 streaming well. WebSocket (persistent TCP): a long-lived bidirectional connection between client and server. Server can push data to the client at any time without the client asking — essential for chat, live dashboards, collaborative editing, gaming, and real-time notifications. The downside: stateful connections are harder to load-balance (sticky sessions required), harder to scale (each connection consumes server memory), and don't work through all corporate proxies. Server-Sent Events (SSE) is a simpler one-way alternative (server→client only) that works over regular HTTP and automatically reconnects. The mature pattern: REST for external/public APIs, gRPC for internal service-to-service, WebSocket or SSE for real-time features. This isn't a compromise — it's the right tool for each job.",
         "why": "Choosing the wrong protocol costs you in one of three ways. (1) Performance tax: REST/JSON between internal services at 50K RPS means you're spending significant CPU on JSON serialization/deserialization and significant bandwidth on verbose text payloads — gRPC would cut both by 5–10×. At scale, this translates to fewer servers needed and lower latency. (2) Developer experience tax: gRPC for a public mobile API means every consumer needs Protobuf tooling, HTTP/2 support, and binary debugging capabilities — the integration friction drives away developers who would have built on a simple REST API in an afternoon. (3) Round-trip tax: REST for a mobile app that needs deeply nested data (user → posts → comments → likes) means 4 sequential API calls on a 200ms mobile connection = 800ms minimum. GraphQL returns it all in one 200ms call. Each protocol excels at something specific: REST at simplicity and universality, GraphQL at flexible client-driven queries, gRPC at efficient service-to-service communication, and WebSocket at real-time push. The question isn't 'which is best?' — it's 'what does each consumer of my API actually need?' For most companies, the answer is a mix — and that's the correct answer.",
@@ -263,6 +297,34 @@
           "action": "Identify the specific hot paths where standard gRPC/Protobuf is the bottleneck (profile with flamegraphs — is time spent in protobuf decode? in HTTP framing? in TLS handshake?). For decode-bound paths, switch to FlatBuffers or Cap'n Proto (zero-copy access eliminates the decode step entirely). For connection-setup-bound paths, deploy HTTP/3 (QUIC) at the edge — it saves 1 RTT per new connection and eliminates TCP head-of-line blocking. For throughput-bound paths, consider persistent stateful connections with custom framing. How to do it: (1) Profile each hot path's request lifecycle with distributed tracing + flamegraphs to identify where time is actually spent. (2) For FlatBuffers migration: define .fbs schema files (similar to .proto), generate accessors, and replace Protobuf on the specific hot paths. Don't convert everything — only the paths where profiling shows decode time is significant. (3) For HTTP/3: enable it at your CDN layer first (Cloudflare: one toggle; Fastly: configuration change) — clients that support QUIC will auto-negotiate. Measure the impact on mobile users specifically (they benefit most from QUIC's connection migration and loss recovery). (4) For custom protocols: only build these for genuinely extreme cases (game netcode, HFT) where no general-purpose protocol is fast enough — the maintenance burden is significant."
         }
       ],
+      "interview": {
+        "prompt": "'REST or gRPC or GraphQL?' Whatever you answer, the follow-up is 'why not the other two?'",
+        "senior": "Compares them on performance, typing, and tooling, picks REST for public and gRPC for internal, and mentions GraphQL's over-fetching benefits.",
+        "staff": "Maps protocols to consumers and operational maturity. Public and partner API: REST, because every proxy, CDN, and SDK generator understands it. Internal hot path: gRPC with Protobuf, because typed contracts and HTTP/2 multiplexing cut latency and generate clients. Mobile with many screens and a slow network: GraphQL, but only with depth limits, complexity budgets, persisted queries, and a data loader to kill N+1. Push: SSE for one-way, WebSocket for two-way, with a long-poll fallback for corporate networks. Discusses the migration path and the cost of each extra protocol in gateways, observability, and on-call knowledge.",
+        "probes": [
+          "Your GraphQL endpoint is public. What stops someone from writing a query that joins your entire database?",
+          "When is SSE strictly better than WebSocket?",
+          "What does gRPC cost you at the edge, and how do you pay it?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "What is the GraphQL N+1 problem and how is it fixed?",
+          "a": "A query for 100 posts with their authors naively makes 1 query for posts and 100 for authors. Fix with a data loader that batches and caches lookups per request, turning 101 queries into 2."
+        },
+        {
+          "q": "Why is gRPC awkward for public browser or mobile APIs?",
+          "a": "Browsers cannot speak raw gRPC (HTTP/2 trailers are inaccessible), so you need gRPC-Web and a proxy; many CDNs, proxies, and debugging tools do not understand binary Protobuf; and partners expect curl-able JSON. It shines internally where you control both ends."
+        },
+        {
+          "q": "When should you choose SSE over WebSocket?",
+          "a": "When data flows only server to client (notifications, live feeds, progress updates). SSE is plain HTTP, auto-reconnects, passes through every proxy and CDN, and needs no special infrastructure. WebSocket earns its complexity only when the client sends frequent messages too."
+        },
+        {
+          "q": "What three protections must a public GraphQL API have?",
+          "a": "Query depth limits, query complexity or cost budgets, and persisted (allow-listed) queries so arbitrary clients cannot compose expensive operations. Add per-field rate limiting for the heavy resolvers."
+        }
+      ],
       "children": []
     },
     {
@@ -278,6 +340,9 @@
         "hyper"
       ],
       "short": "None → Nginx → managed gateway → global custom edge — the single front door for all API traffic",
+      "tldr": "The gateway is the single front door: it terminates TLS, authenticates once, enforces rate limits, routes, and emits uniform telemetry so none of that is duplicated in every service. Keep it thin. Business logic in the gateway turns your front door into a second monolith.",
+      "keyInsight": "A gateway concentrates cross-cutting concerns and therefore concentrates risk. It is in every request path, so it must be the most boring, most redundant, most load-tested component you run. The ironic outage is the gateway you added for resilience taking down everything behind it.",
+      "mentalModel": "A hotel front desk. It checks your ID (auth), notes how many times you have come through today (rate limit), tells you which floor (routing), and logs the visit (observability). It does not cook your dinner. The moment the front desk starts doing room service, every guest waits in the lobby.",
       "detail": {
         "what": "An API gateway is a single entry point for all incoming API traffic — the 'front door' of your system. It sits between clients and your backend services, handling cross-cutting concerns that would otherwise be duplicated in every service: (1) Authentication — validate JWT tokens, API keys, or OAuth tokens once at the edge instead of in each service. (2) Rate limiting — enforce per-client, per-IP, per-endpoint request limits to prevent abuse and ensure fair usage. (3) SSL/TLS termination — handle the encryption/decryption overhead at the gateway so backend services communicate in plaintext (or mTLS) internally. (4) Request routing — direct /api/users to the user service, /api/orders to the order service, based on URL path, headers, or query parameters. (5) Logging and observability — centralized access logs, request tracing, and metrics collection. (6) Request/response transformation — add headers, rewrite URLs, transform payloads (e.g., XML↔JSON for legacy integrations). (7) Traffic management — canary routing (send 1% of traffic to the new version), A/B testing (route by user cohort), request shadowing (duplicate traffic to a test environment for comparison). Without a gateway, each service must implement all of these individually — inconsistent behavior, duplicated code, and security gaps are inevitable. With a gateway, you change auth logic in one place and it applies everywhere, you add rate limiting with one configuration change, and you get canary deployments for free.",
         "why": "The gateway's value increases with the number of backend services. With 2 services, the overhead of a gateway barely pays for itself. With 20 services, the alternative (each service implementing its own auth, rate limiting, SSL, logging, and routing) means 20 different implementations of the same cross-cutting concerns, maintained by 20 different teams, each with slightly different bugs and security gaps. The gateway centralizes these: one team, one implementation, one configuration. But the gateway is also a double-edged sword: it's a single point of entry, which means it's a single point of failure. If the gateway goes down, your entire API is down — regardless of how healthy your backend services are. This means the gateway must be the most reliable, most monitored, most redundant component in your system. Always run at least 2 gateway instances behind a load balancer (even in development). Health-check them aggressively (every 5 seconds). And keep the gateway thin: routing, auth, rate limiting, logging. The moment business logic creeps into the gateway, it becomes both the bottleneck and the risk for every service — and deploys to the gateway become terrifying because a bug affects everything.",
@@ -402,6 +467,34 @@
           "action": "Deploy gateway logic at the edge. How to do it depends on your approach: (A) Cloudflare Workers / Fastly Compute@Edge route: move auth validation, rate limiting, and routing logic to edge workers that run at 300+ PoPs. This is the fastest path to global edge — you get the PoP network without building it. Implementation: write your gateway logic as a Worker script, deploy via Wrangler CLI, and point your DNS at Cloudflare. (B) Custom Envoy edge route: deploy Envoy proxies at your own PoPs (or in multiple cloud regions) with a custom xDS control plane that pushes configuration changes in real-time. Use anycast BGP so user traffic automatically routes to the nearest Envoy instance. Implementation: this requires network engineering expertise (BGP, anycast, PoP deployment) — only pursue if you have a network team or if your traffic justifies the investment ($1M+/month cloud spend typically). (C) Hybrid: Cloudflare/Fastly for the edge network, custom Envoy for the origin gateway. Edge handles TLS termination, DDoS, basic rate limiting, static caching; origin gateway handles service routing, auth, and dynamic rate limiting."
         }
       ],
+      "interview": {
+        "prompt": "'Where does authentication happen?' and 'How do you stop a single client from overwhelming the backend?' are both gateway questions in disguise.",
+        "senior": "Puts an API gateway in front of services to handle auth, rate limiting, and routing, and names a product (Kong, Envoy, AWS API Gateway).",
+        "staff": "Specifies what the gateway does (TLS, JWT validation, coarse rate limits, routing, request ids, metrics) and what it must not do (business rules, data transformation beyond trivial, orchestration). Plans for the gateway's own failure: multiple instances behind an anycast or L4 balancer, config as code with staged rollout, a bypass path for internal east-west traffic so services do not tax themselves. Knows the product limits (AWS API Gateway's default throttles, Kong's plugin latency) and tests them. Describes the evolution: nginx reverse proxy, then a managed gateway, then Envoy at the edge with a service mesh inside, and at hyper scale a custom edge layer. Connects it to canaries: header-based routing of 1 percent of traffic to a new version.",
+        "probes": [
+          "The gateway adds 8ms to every request. Where does that go and how do you cut it?",
+          "Internal services call each other through the public gateway. What is wrong with that?",
+          "How do you roll out a gateway config change without risking every endpoint at once?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "List what belongs in a gateway and three things that do not.",
+          "a": "Belongs: TLS termination, authentication and token validation, rate limiting, routing, request ids and metrics, coarse request validation. Does not belong: business logic, data aggregation across services, workflow orchestration, anything that needs a database."
+        },
+        {
+          "q": "Why does internal service-to-service traffic need a bypass around the gateway?",
+          "a": "Routing east-west traffic through the public edge adds latency, doubles the gateway's load, applies external rate limits to your own services, and makes the gateway a single point of failure for internal calls. Use direct calls, a service mesh, or an internal gateway instead."
+        },
+        {
+          "q": "How does a gateway enable canary deployments?",
+          "a": "It can route a percentage of traffic or requests with a specific header to a new version of a service, and shift the percentage up as error rates stay flat. The gateway's metrics per route and version are the signal that decides promotion or rollback."
+        },
+        {
+          "q": "What did Netflix learn from Zuul that led to rewriting it?",
+          "a": "Zuul 1 was blocking and thread-per-request, which collapsed under slow backends and large connection counts. Zuul 2 moved to non-blocking async I/O. Lesson: a gateway must be more resilient than anything behind it, so its concurrency model matters."
+        }
+      ],
       "children": []
     },
     {
@@ -417,6 +510,9 @@
         "hyper"
       ],
       "short": "Per-user, per-IP, per-service rate control — the cheapest insurance against both attacks and accidents",
+      "tldr": "Rate limiting is cheap insurance against both attackers and your own buggy clients. Token bucket or sliding window, keyed on the right identity, enforced close to the edge, with 429 responses that carry Retry-After. The hard part at scale is counting accurately across many nodes without adding latency.",
+      "keyInsight": "A rate limiter without a Retry-After header creates the retry storm it was meant to prevent. Clients that are told 'no' with no guidance all retry immediately and in sync, and your limiter becomes the DDoS.",
+      "mentalModel": "A nightclub door with a counter. Token bucket is a stack of wristbands refilled at a steady rate: come in bursts if bands are available, wait if not. The bouncer must recognize who you are (the key), be at the right door (the edge), and tell you when to come back (Retry-After). Several doors sharing one counter is the distributed problem.",
       "detail": {
         "what": "Rate limiting restricts how many requests a client can make within a time window. It's three things simultaneously: (1) Protection — prevents one misbehaving client (whether malicious attacker or buggy code) from consuming all your backend capacity and creating an outage for everyone else. (2) Fairness — ensures that one tenant's heavy usage doesn't degrade the experience for other tenants in a shared system. (3) Monetization — enables tier-based pricing in commercial APIs (free=100 req/min, pro=10K/min, enterprise=100K/min). Rate limiting operates at multiple levels: per-IP (anti-abuse — stops DDoS and brute force), per-user/API-key (fair usage — each authenticated client gets their quota), per-endpoint (resource protection — expensive endpoints like /search get tighter limits than cheap endpoints like /health), and global (circuit breaker — overall system capacity protection). The algorithms determine how limits are enforced: token bucket (a bucket fills with tokens at a steady rate; each request consumes a token; when empty, requests are rejected — allows bursts up to bucket capacity while enforcing average rate), sliding window (count requests in a rolling time window — more accurate than fixed windows, slightly more memory), fixed window (count requests per calendar minute/hour — simplest but allows double-rate at window boundaries), and GCRA (Generic Cell Rate Algorithm — the most mathematically elegant, used by Cloudflare and Stripe, equivalent to a leaky bucket). All of these answer the same question: 'should this request be allowed through, or should it be rejected with a 429 Too Many Requests?'",
         "why": "Without rate limiting, your system is one infinite loop away from an outage. Consider: a mobile developer ships a bug that retries a failed request in a tight loop. One user's phone generates 1,000 requests per second. With 100,000 users who update the app, you're suddenly receiving 100 million requests per second from your own customers. Without rate limiting, your servers try to handle all of them, saturate, and crash — taking down every user, not just the ones with the buggy app. Rate limiting would have capped each client at, say, 100 requests per minute, and the buggy app would have received 429 responses while everyone else continued normally. This exact scenario has caused real production outages at major companies. Even well-meaning clients can overwhelm you: a partner integration that queues requests during a maintenance window and replays them all at once when your API comes back ('thundering herd'). Rate limits are also the mechanism that makes API pricing work: Stripe, Twilio, GitHub, and every commercial API uses rate limiting to differentiate tiers. The 429 response with a Retry-After header is part of the developer experience — it tells the consumer exactly what happened and when to try again. Rate limiting is the cheapest, highest-impact infrastructure investment you can make — a few hours of work prevents an entire category of outages and attacks.",
@@ -548,6 +644,34 @@
           "to": "hyper",
           "trigger": "Rate limit coordination adds measurable latency to every request (>1ms for the Redis round-trip), or you need global rate limiting across 100+ PoPs, or you need to rate-limit at the edge before traffic reaches your infrastructure",
           "action": "Move to edge-local approximate limiting with background global reconciliation. How to do it: (1) Deploy rate limiting logic at each edge PoP (Cloudflare Workers with KV, Fastly Compute@Edge with local state, or custom Envoy at each PoP). (2) Each PoP enforces limits locally with GCRA — zero external dependencies per request. (3) Every 5–10 seconds, each PoP reports its per-consumer counts to a global aggregation service (via Kafka or a lightweight custom protocol). (4) The global aggregator calculates total consumption per consumer, compares to the global quota, and pushes updated 'budget allocations' back to each PoP (proportional to each PoP's share of that consumer's traffic). (5) Implement shadow mode: new rate limits run in log-only mode for 1 week before enforcement — analyze the impact, adjust thresholds, then enable enforcement. (6) Build an anomaly detection layer on top of rate limit data: ML-based detection of unusual traffic patterns (sudden 10× spike from a single consumer, geographic distribution change) that trigger dynamic tighter limits."
+        }
+      ],
+      "interview": {
+        "prompt": "'Design a rate limiter' is a classic standalone question, and it also appears inside almost every API design as a follow-up.",
+        "senior": "Describes token bucket versus sliding window, stores counters in Redis, keys by user id or API key, returns 429 with headers.",
+        "staff": "Starts with policy: what is being protected (auth endpoints, expensive endpoints, write paths) and what the limit means to a customer (tiers, burst allowance). Chooses the key carefully: user or API key for authenticated traffic, IP only as a fallback with awareness of NAT and shared egress. Places limiting at the edge for abuse and at the service for fairness. Addresses distribution: local token buckets with periodic sync are fast and approximately right; a central Redis is exact but a bottleneck and a cross-region latency problem; the staff answer is tiered: coarse limits at the edge with eventual sync, precise limits for the few operations that must be exact. Handles the client side: 429 with Retry-After, jittered backoff, and documentation. Monitors rejected rate per customer as a product signal.",
+        "probes": [
+          "You have 50 edge nodes and a limit of 100 requests per minute. How do you enforce it without a round trip to Redis per request?",
+          "A corporate customer's whole office shares one IP. What goes wrong and what do you key on instead?",
+          "Which endpoints get stricter limits than the default, and why?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "Compare token bucket and sliding window log for rate limiting.",
+          "a": "Token bucket allows controlled bursts (bucket capacity) at a steady refill rate and needs only two numbers per key, making it cheap and memory-light. Sliding window log stores timestamps of each request for exact counting, at higher memory cost. Most systems use token bucket or a sliding window counter approximation."
+        },
+        {
+          "q": "Why does local-only rate limiting fail in a distributed system?",
+          "a": "With N nodes each enforcing the limit independently, a client can get N times the intended rate by spreading requests. Fix with a shared counter (Redis), a gossip or periodic sync of local counters, or by dividing the global limit by N and accepting imprecision."
+        },
+        {
+          "q": "What must a 429 response include and why?",
+          "a": "A Retry-After header (or rate limit reset headers) telling the client when to try again. Without it, clients retry immediately and in sync, producing a retry storm that hits harder than the original traffic."
+        },
+        {
+          "q": "Which endpoints deserve stricter rate limits than the default?",
+          "a": "Authentication and password reset (credential stuffing), anything that sends email or SMS (cost and abuse), expensive queries like search or export (compute bombs), and write endpoints generally. The default limit protects capacity; these limits protect against targeted abuse."
         }
       ],
       "children": []

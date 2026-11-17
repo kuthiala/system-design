@@ -11,6 +11,9 @@
     "hyper"
   ],
   "short": "Primary store + cache + search — the most consequential and least reversible decision in your entire system",
+  "tldr": "The database layer is three stores, not one: a transactional source of truth, a cache that absorbs most reads, and a search index for full-text and faceted queries. The primary store is the least reversible decision in the whole system, so default to Postgres and earn your way out of it with numbers.",
+  "keyInsight": "Your database choice is sticky because data has gravity: every query, every ORM model, every report, and every backup script grows roots into its shape. Changing it later is a migration measured in quarters. Choose for the access pattern you have, not the scale you dream of.",
+  "mentalModel": "A ledger, a sticky note, and a card catalog. The ledger (primary store) is the truth and is slow to write but never wrong. The sticky note (cache) is the answer you remember so you do not reopen the ledger. The card catalog (search index) helps you find things by description. Nobody keeps their money in the sticky note.",
   "detail": {
     "what": "The database layer is the collection of storage systems that hold your application's state — the data that, if lost, would end the business. It typically involves three specialized stores rather than one general-purpose database. (1) Primary transactional store: the source of truth where authoritative data lives — users, orders, payments, inventory. This is your PostgreSQL, MySQL, DynamoDB, or Cassandra. Every write goes here first; every other store derives from it. (2) Cache: a fast in-memory store (Redis, Memcached) holding hot data for sub-millisecond reads, absorbing 80–95% of read traffic so the primary DB isn't overwhelmed. The cache is derived data — if it vanishes, you rebuild it from the primary store. (3) Search index: a purpose-built engine (Elasticsearch, Typesense) optimized for full-text search, fuzzy matching, faceted filtering, and relevance ranking — capabilities that SQL databases handle poorly or not at all. Most non-trivial systems end up with all three because no single database excels at transactional writes, high-throughput reads, AND flexible text search simultaneously. The primary store optimizes for write durability and consistency; the cache optimizes for read speed; the search index optimizes for query flexibility. Trying to make one system do all three results in mediocrity at each. The key mental model: your primary store is the single source of truth. Everything else — caches, search indexes, materialized views, read replicas — is a derived, eventually-consistent copy optimized for a specific access pattern. If in doubt about which store has the 'right' data, it's always the primary store.",
     "why": "The database is the most consequential and least reversible decision in system design — and it's not close. Application code can be rewritten in months (companies switch from Ruby to Go, from monolith to microservices, from React to Vue). Database migrations take 6–18 months and carry non-zero data-loss risk. Why? Because the data must be preserved perfectly during the transition — you can't lose a single row of financial data, a single user account, or a single message. This means running two databases in parallel (dual-write), verifying every read returns identical results from both (shadow reads), backfilling historical data, handling the inevitable inconsistencies, and finally cutting over — all while the system serves live traffic 24/7. Choosing the wrong primary store can cap your scale (PostgreSQL struggles past 500K writes/sec without sharding), cap your features (Cassandra can't do ad-hoc JOINs, DynamoDB can't do flexible queries without GSIs), or cap your budget (DynamoDB at $0.25/M writes gets expensive fast at high volume). Choosing the wrong secondary store wastes operational effort on infrastructure you didn't need. The right answer depends on access pattern, not popularity. PostgreSQL is famously underrated — it handles 90% of workloads at small-to-medium scale beautifully, with ACID transactions, rich query capabilities, excellent tooling, and a 25-year track record. MongoDB is famously overused — chosen because 'it's webscale' or 'JSON is easier,' only to discover 6 months later that the data has relationships that need JOINs, and the application is hand-rolling them in code at 10× the complexity and 100× the latency of SQL. Cassandra is famously misunderstood — extraordinary for write-heavy time-series at massive scale, but a terrible choice for a CRUD app that needs ad-hoc queries. Every database is the right answer for some workload and the wrong answer for others. Your job is to match the database to the workload, not to the hype cycle.",
@@ -114,6 +117,34 @@
       "action": "For global strong consistency: Google Cloud Spanner ($0.90/node-hour, GPS+atomic-clock-based TrueTime for global ordering) or CockroachDB (open-source Spanner-inspired, Raft consensus, ~$0.14/vCPU-hour managed). For maximum write throughput: DynamoDB Global Tables (multi-region active-active with last-writer-wins conflict resolution). For petabyte analytical workloads: separate OLTP from OLAP entirely with a dedicated data warehouse (see Phase 14). How to do it: (1) For Spanner: define your schema in Spanner DDL, configure multi-region instance, and use the Spanner client libraries — Spanner handles distribution, replication, and consistency transparently. (2) For CockroachDB: deploy a multi-region cluster, use LOCALITY-OPTIMIZED tables to pin data to the region where it's most accessed while maintaining global consistency. (3) At this scale, most companies operate multiple database engines for different workloads — accept polyglot persistence and invest in a data platform team to manage the ecosystem."
     }
   ],
+  "interview": {
+    "prompt": "'What database would you use?' The interviewer is less interested in the name than in whether you reason from access patterns.",
+    "senior": "Picks SQL for relational data and transactions, NoSQL for scale or flexible schema, adds Redis for caching and Elasticsearch for search.",
+    "staff": "Derives the choice from the access patterns written down in requirements: key lookups versus joins, write rate, hot keys, consistency per operation, and data size trajectory. Defaults to a managed relational database with a replica and a connection pooler, and names the specific numbers at which that stops working (100K writes/sec, multi-TB working set, global strong consistency). Explains why NoSQL for 'scale' is the most expensive bandwagon: joins move into application code and the team rebuilds SQL badly. Treats cache and search as derived data that can be rebuilt from the primary, with explicit invalidation and async indexing. Talks about operational maturity: slow query logs, query timeouts, backups tested by restore, and what the first six months of production will reveal.",
+    "probes": [
+      "Why Postgres instead of DynamoDB here, and at what number does that flip?",
+      "You cached the user profile. Now a user updates their name. Walk me through every place that must change.",
+      "What is the first database problem you expect to hit in production, and how will you see it coming?"
+    ]
+  },
+  "quiz": [
+    {
+      "q": "What are the three stores in a typical database layer and what is each responsible for?",
+      "a": "The primary transactional store is the source of truth (users, orders, payments). The cache serves repeated reads from memory and can be lost without data loss. The search index answers full-text, fuzzy, and faceted queries and is rebuilt from the primary. Cache and search are derived; only the primary is authoritative."
+    },
+    {
+      "q": "Why is 'NoSQL because it scales' usually the wrong reason?",
+      "a": "Most systems never reach the write rates where a sharded relational database stops working, and NoSQL's cost is paid immediately: no joins, no transactions across entities, schema enforced in application code, and painful ad hoc queries. Choose NoSQL for a specific access pattern (key-value at huge write rates, time series, graph), not for hypothetical scale."
+    },
+    {
+      "q": "Why does every production database need a connection pooler?",
+      "a": "Each database connection costs memory and a process or thread; Postgres handles a few hundred well. Autoscaled application instances multiply connections and exhaust the limit, causing an outage with low CPU. A pooler (PgBouncer, RDS Proxy) multiplexes thousands of client connections onto a small number of server connections."
+    },
+    {
+      "q": "Why should caching not be your first optimization?",
+      "a": "Caching hides the real problem (missing index, N+1 queries, no pagination) and adds invalidation complexity. Fix the query first; it often removes the need for a cache entirely. Add the cache when the query is already good and the read volume still exceeds what the primary can serve."
+    }
+  ],
   "children": [
     {
       "name": "Primary Store",
@@ -128,6 +159,9 @@
         "hyper"
       ],
       "short": "SQL vs NoSQL — the answer depends on your access pattern, not the technology's marketing",
+      "tldr": "SQL versus NoSQL is an access-pattern question. Relational databases give joins, transactions, and decades of tooling and scale further than most people think. Choose a document, wide-column, or key-value store when you have a concrete pattern that needs it: massive write rates on a simple key, time series, or truly schemaless data.",
+      "keyInsight": "Schema-less does not mean no schema; it means the schema lives in every piece of application code that reads the data, with no enforcement and no single place to look it up. You traded a database constraint for a tribal-knowledge constraint.",
+      "mentalModel": "A spreadsheet versus a filing cabinet of folders. The spreadsheet (relational) lets you cross-reference anything with anything, and it stays consistent, but it has one owner at a time. Folders (document store) let many clerks file in parallel and each folder can hold anything, but asking 'which folders mention invoice 42' means opening every folder.",
       "detail": {
         "what": "The primary store is the transactional, source-of-truth database — the system that, if you lost it without backup, would end the company. This is where users, orders, payments, and inventory live. The major categories: SQL/Relational (PostgreSQL, MySQL): data stored in rows within tables with a fixed schema, related through foreign keys, queried with SQL. Supports ACID transactions (Atomicity, Consistency, Isolation, Durability) — meaning a transfer from Account A to Account B either fully succeeds or fully fails, never leaving money in limbo. 40 years of query optimization means the database can find efficient execution plans for complex queries automatically. NoSQL Document (MongoDB, DynamoDB, Firestore): data stored as semi-structured documents (JSON-like) with flexible per-document schema. Accessed primarily by key (document ID) or simple queries. Horizontal scaling is easier because documents are self-contained (no cross-document JOINs needed). Trade-off: no JOINs, limited transactions, application code must handle data relationships. Wide-Column (Cassandra, ScyllaDB, HBase): data stored in rows with dynamic columns, optimized for write-heavy workloads and time-series data. Uses LSM-tree storage engines that buffer writes in memory and flush to disk sequentially — enabling 10–100× higher write throughput than B-tree databases. Trade-off: reads are slower (must merge data from multiple sorted files), no JOINs, limited query flexibility. NewSQL (CockroachDB, TiDB, Google Spanner, YugabyteDB): SQL semantics (schema, transactions, JOINs) with horizontal scaling built in. Achieves this through distributed consensus protocols (Raft, Paxos) that coordinate writes across nodes. Trade-off: higher per-write latency (consensus overhead of 5–50ms) and operational complexity compared to single-node PostgreSQL.",
         "why": "This choice determines your data model, your query capabilities, your consistency guarantees, your scaling path, and your team's daily development experience for years. Pick based on access pattern, not buzzwords. The decision framework: (1) If your data has relationships (users → orders → items → reviews) and you need to query across those relationships (show me all orders by users who reviewed this product): SQL. (2) If your data is genuinely document-shaped (each document is self-contained, rarely needs to reference other documents) and you need flexible schema (different documents have different fields): Document store. (3) If your workload is massively write-heavy with time-series characteristics (sensor data, event logs, message history) and you primarily query by time range within a partition: Wide-column. (4) If you need SQL semantics (JOINs, transactions) but also need horizontal scaling across multiple nodes or regions: NewSQL. Most applications have relational data. The internet runs on relationships: users follow users, users create posts, posts have comments, comments have reactions, reactions are by users. SQL databases model this naturally. Choose NoSQL only when your access pattern specifically demands it, not as a default.",
@@ -252,6 +286,34 @@
           "action": "Deploy a globally distributed database (Spanner or CockroachDB) for data requiring global consistency, or DynamoDB Global Tables for data where eventual consistency is acceptable. How to do it for Spanner: (1) Create a multi-region instance configuration (e.g., nam-eur-asia1 for global). (2) Define your schema in Spanner DDL — interleaved tables for parent-child data locality. (3) Use Spanner client libraries — they handle routing, retries, and transaction coordination automatically. (4) For existing applications: this is a full data migration using the dual-write pattern (see Phase 21). For CockroachDB multi-region: (1) Deploy nodes in 3+ regions. (2) Configure locality-optimized tables: ALTER TABLE orders SET LOCALITY REGIONAL BY ROW — each row is pinned to a region but globally readable. (3) Transactions within a region are fast (~5ms); cross-region transactions pay consensus latency (~50–100ms). Plan your data model to minimize cross-region transactions."
         }
       ],
+      "interview": {
+        "prompt": "'SQL or NoSQL?' is the oldest trap in the interview. The answer 'it depends' only works if you can say on what.",
+        "senior": "Explains relational for structured data with joins and transactions, document stores for flexible schemas, wide-column for write-heavy time series, and key-value for simple lookups.",
+        "staff": "Starts from the dominant access patterns in the requirements and picks the store that makes the hottest one cheap. Defaults to Postgres and defends it with numbers: a single tuned primary does tens of thousands of writes per second and multi-TB with a replica and pooler. Identifies the specific sub-workload that might need something else (location pings at 1M writes/sec, an event log at petabyte scale) and gives that workload its own store rather than moving everything. Discusses operational realities: Postgres bloat and vacuum, MySQL's replication maturity, DynamoDB's hot partitions and pricing model, Cassandra's tombstones. Names the migration cost as the reason to decide carefully, and keeps the OLAP workload off the OLTP store from day one.",
+        "probes": [
+          "Which single access pattern in this design is hardest for Postgres, and what would you do about it?",
+          "Give me a number at which you would stop using a single relational primary.",
+          "What does a NoSQL store make hard that you will have to rebuild in application code?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "Give three concrete access patterns where a non-relational store is the right first choice.",
+          "a": "Very high write rates on a simple key with no joins (sensor or location pings into a wide-column store), time series with retention and rollups, and graph traversals many hops deep. In each case the relational model fights the pattern rather than serving it."
+        },
+        {
+          "q": "What does 'premature sharding' cost?",
+          "a": "Cross-shard joins and transactions disappear, every query needs a shard key, migrations become N times harder, and operational complexity arrives years before the write volume that would justify it. A read replica and a bigger instance usually buy years."
+        },
+        {
+          "q": "Why should OLTP and OLAP never share an instance?",
+          "a": "Analytical queries scan millions of rows and evict the working set from memory, lock resources, and compete for I/O, so a dashboard query degrades every user-facing request. Replicate or export to a warehouse built for scans."
+        },
+        {
+          "q": "How did Notion scale Postgres to billions of blocks?",
+          "a": "They sharded by workspace id across many Postgres instances, routing in the application layer, so each query stays on one shard and the relational model is preserved. The lesson: sharding a relational database keeps the tooling and semantics you know; switching engines throws them away."
+        }
+      ],
       "children": []
     },
     {
@@ -267,6 +329,9 @@
         "hyper"
       ],
       "short": "None → Redis → Cluster → Multi-tier (L1/L2/CDN) — the amplifier that makes everything else work",
+      "tldr": "A cache turns a 5 to 50ms database read into a sub-millisecond memory read for the 80 to 95 percent of reads that repeat. It is the amplifier that makes everything else work, and its failure modes (stampedes, stale data, cache as truth) are the most common cause of surprising outages.",
+      "keyInsight": "A cache changes the shape of your load, not just its size. When it fails, the database does not see a bit more traffic; it sees all of it at once, cold. Every cache design must answer: what happens on the day it is empty?",
+      "mentalModel": "A barista who remembers regulars' orders. Most customers get served instantly without the till (the database). But if the barista forgets everything at once, the whole queue hits the till in the same second. And if the barista's memory is the only record of orders, the shop has no books.",
       "detail": {
         "what": "A cache is a fast in-memory store that holds frequently-read data, returning it without hitting the slower primary database. Reading from cache takes 0.1–0.5ms; reading from a database takes 5–50ms. That 50–500× speed difference, applied to 80–95% of your reads, is the difference between a fast system and a slow one — and between needing 5 database nodes and needing 50. The cache layer involves four key decisions: (1) What to cache: session data, user profiles, computed aggregations, rendered HTML fragments, API responses, feature flags, hot database rows — anything that's read frequently and changes infrequently relative to read rate. (2) Cache pattern: cache-aside (application reads cache first, on miss reads DB and writes to cache — the most common pattern), read-through (cache itself fetches from DB on miss — simpler application code, but cache must know about DB), write-through (writes go to cache AND DB simultaneously — cache is always fresh, but every write pays cache latency), write-behind (writes go to cache first, asynchronously flushed to DB — fastest writes, but data loss risk if cache crashes before flush). (3) Invalidation strategy: TTL-based (cache entries expire after a fixed duration — simplest, accepts bounded staleness), explicit invalidation (application deletes/updates cache entry when the underlying data changes — freshest, but every write path must remember to invalidate), write-through (cache is always updated on write — no staleness, but more complex write path). (4) Cache topology: single node (simple, one server), cluster (multiple shards for horizontal scaling and HA), multi-tier (L1 in-process cache for <1μs access + L2 distributed cache for shared state + L3 CDN for HTTP-level caching at the edge). The golden rule of caching: the cache is always derived data. The database is always the source of truth. If the cache disappears entirely (Redis restarts, memory evicted), the system must continue to function — slower, but correctly — by falling through to the database.",
         "why": "Caching is the single most impactful performance optimization in most systems. Consider a typical API endpoint that queries the database for a user profile: without cache, 100K requests/sec means 100K database queries/sec — you need a large, expensive, heavily-tuned database cluster. With a cache serving 95% of reads (95% hit rate), you need only 5K database queries/sec — a single well-tuned PostgreSQL instance handles this comfortably. You've reduced your database infrastructure by 20× with one abstraction layer. Caching also solves the 'hot key' problem: when a celebrity posts on social media, 10 million users try to read that post simultaneously. Without cache, 10M requests hit the database — which melts. With cache, 1 request hits the database, the result is cached, and the next 9,999,999 requests are served from memory in 0.1ms. The cache absorbs the storm; the database never notices it. But caching comes with real costs: (1) Cache invalidation — 'there are only two hard things in computer science: cache invalidation and naming things.' When the underlying data changes, the cached copy becomes stale. Your invalidation strategy determines how stale data can get and how complex your write paths become. (2) Cache stampede — when a popular key expires, hundreds of concurrent requests simultaneously miss the cache and flood the database. (3) Memory costs — Redis at $36/GB/month adds up when you're caching terabytes. (4) Operational complexity — another system to monitor, alert on, back up (or not), and understand failure modes of. Add a cache when the database is the proven bottleneck and you've already optimized queries. Don't add it preemptively.",
@@ -394,6 +459,34 @@
           "action": "Implement multi-tier caching (L1 + L2 + CDN) with a unified invalidation protocol. How to do it: (1) Add L1 in-process cache using Caffeine (Java), ristretto (Go), or a simple LRU (Node/Python). Set L1 TTL very short (30s–2min) to limit staleness. Set L1 max size to ~10% of heap. (2) L1 checks first; on miss, check L2 (Redis Cluster); on miss, query DB and populate both L2 and L1. (3) For invalidation: when data changes, publish to a Redis Pub/Sub channel 'invalidation:{type}'. Each app instance subscribes and clears its L1. Redis Cluster clears L2 via DEL. CDN purges via API call. (4) For CDN caching: set Cache-Control headers on cacheable API responses (Cache-Control: public, max-age=300, stale-while-revalidate=60). Use Surrogate-Key headers (Fastly) or Cache-Tag headers (Cloudflare) for targeted purging. (5) Build a cache management dashboard: hit rate per tier (L1, L2, CDN), memory usage per tier, invalidation latency (time from write to all tiers refreshed), and top-N hottest keys."
         }
       ],
+      "interview": {
+        "prompt": "'Add caching' is where most designs go. 'How do you keep it correct?' is where most designs fall apart.",
+        "senior": "Adds Redis with cache-aside, sets TTLs, and mentions invalidation on writes and an LRU eviction policy.",
+        "staff": "Chooses the pattern per data type (cache-aside for read-mostly, write-through for data that must never be stale, write-behind only for counters that can tolerate loss) and the layer (in-process L1 for hot keys with a short TTL, distributed L2, CDN for public responses). Designs against stampedes: request coalescing, probabilistic early expiration, jittered TTLs, and a lock per key. Treats invalidation as part of the write path with an outbox or CDC stream rather than hoping TTLs are short enough. Plans for the cold cache: warming scripts, gradual traffic ramp, and a database sized to survive a full miss for a few minutes. Monitors hit rate per key class and treats a hit rate plateau as a signal the working set has outgrown memory.",
+        "probes": [
+          "A hot key expires and 10,000 requests miss at once. What happens and how do you prevent it?",
+          "The cache cluster restarts. Does the database survive the next 60 seconds?",
+          "How do you invalidate a cached user profile that is embedded in 50 cached timelines?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "What is a cache stampede and what are three mitigations?",
+          "a": "Many concurrent requests miss the same key at once (often on expiry) and all hit the database together. Mitigate with request coalescing (one request fetches, the rest wait), probabilistic early refresh before expiry, jittered TTLs so keys do not expire in sync, and a per-key lock or lease."
+        },
+        {
+          "q": "Compare cache-aside, write-through, and write-behind.",
+          "a": "Cache-aside: the application reads cache, misses to the database, and populates; simple, tolerates cache loss, risks stale reads until invalidated. Write-through: writes go to cache and database synchronously; never stale, slower writes. Write-behind: writes go to cache and flush later; fastest writes, but a cache crash loses data, so only for tolerable-loss data like counters."
+        },
+        {
+          "q": "Why is using the cache as the source of truth a catastrophe waiting to happen?",
+          "a": "Caches evict under memory pressure, lose data on restart, and are not durable by design. If a value exists only in cache, an eviction or restart is data loss. Everything in a cache must be reconstructible from a durable store."
+        },
+        {
+          "q": "What does 'hit rate plateaus below 90 percent' tell you?",
+          "a": "The working set no longer fits in the cache, so adding TTL or tuning will not help. Either grow memory (cluster), add a tier (local L1 for the hottest keys), or shrink the working set (smaller values, smarter keys)."
+        }
+      ],
       "children": []
     },
     {
@@ -409,6 +502,9 @@
         "hyper"
       ],
       "short": "DB LIKE → Postgres FTS → Elasticsearch → custom search — add only when search is a real product feature",
+      "tldr": "Search is a derived index built around inverted indexes for relevance, fuzzy matching, facets, and autocomplete. Start with your database's full-text features, move to Elasticsearch, OpenSearch, or a managed service when search is a real product feature, and never let the index become your source of truth.",
+      "keyInsight": "A search index is a cache with a different shape. It must be rebuildable from the primary store at any time, and the moment indexing sits synchronously in the write path, your write availability is capped by your search cluster's health.",
+      "mentalModel": "The index at the back of a book. The book (primary store) is the truth. The index lets you find pages by topic instantly, but it is generated from the book, can be regenerated, and nobody reads the index to learn the content. Printing the index inside the main text would slow every page.",
       "detail": {
         "what": "A search index is a specialized data structure optimized for full-text search, fuzzy matching, faceted filtering, relevance ranking, autocomplete, and geospatial queries. It's built around inverted indexes: instead of the B-tree approach (given a record ID, find the record), an inverted index maps words to the list of documents containing them (given the word 'kubernetes,' return all documents mentioning it — ranked by relevance). This fundamental difference is why search engines can find 'kubernetes' in 10 million documents in 10ms while SQL LIKE '%kubernetes%' takes 30 seconds — LIKE does a full table scan, checking every row; the inverted index does a direct lookup. Modern search engines add: BM25 ranking (a probabilistic relevance algorithm that considers term frequency, inverse document frequency, and document length), fuzzy matching (find 'kubernetes' even if the user typed 'kuberntes'), stemming (match 'running' when searching 'run'), synonyms (match 'automobile' when searching 'car'), faceted filtering (filter by category, price range, date, etc. with count per facet), autocomplete/suggest (type-ahead as the user types), and highlighting (show the matching text snippet with the search term bolded). These capabilities are fundamentally outside what SQL databases can provide efficiently — SQL was designed for structured data retrieval, not relevance-ranked text search.",
         "why": "SQL LIKE '%search_term%' does a full table scan — it checks every single row in the table, comparing the search term character by character. This is O(N) where N is the number of rows times the average field length. At 10K records, it takes maybe 100ms — noticeable but tolerable. At 1M records, it takes 5–10 seconds — unacceptable for interactive use. At 100M records, it takes minutes. And LIKE '%...%' can't handle: relevance ranking (which result is MOST relevant?), typos/fuzzy matching (user typed 'jvascript' — did they mean 'javascript'?), stemming (searching 'running' should find 'run,' 'ran,' 'runner'), faceted counts (how many results per category?), or spatial search (find restaurants within 5km). A purpose-built search engine handles all of these in 10–50ms on 100M+ documents. But search engines are operationally heavier than a plain database — they're another system to manage, monitor, and keep in sync. Only adopt one when search is a real product feature that users interact with, not as a premature optimization for a filtered list that SQL handles fine with proper indexes.",
@@ -531,6 +627,34 @@
           "to": "hyper",
           "trigger": ">1B documents OR sub-10ms latency required globally OR semantic/vector search is a core requirement",
           "action": "Build a two-stage search pipeline: recall (fast candidate retrieval) + ranking (ML-based re-ordering). How to do it: (1) Recall stage: maintain both an inverted index (BM25 text search) and a vector index (ANN for semantic similarity). For hybrid search, use Elasticsearch 8's kNN feature (combines BM25 and vector scores), or Vespa (native hybrid search). (2) Ranking stage: train a cross-encoder re-ranker on your click-through logs (cross-encoder models from Hugging Face, fine-tuned on your domain). Deploy as a lightweight inference service that re-ranks the top 100 candidates from the recall stage. (3) For global deployment: replicate the search index to each region (Elasticsearch Cross-Cluster Replication, or separate clusters per region synced via your indexing pipeline). Route users to the nearest search cluster via GeoDNS. (4) For vector embeddings: embed documents during the indexing pipeline (run embedding model on new/updated documents), store both the embedding vector and the text in your search engine, and at query time, embed the query and search both the vector index and the text index, then merge results."
+        }
+      ],
+      "interview": {
+        "prompt": "'Users need to search products by name, filter by category, and get autocomplete.' The interviewer wants to see when you add a search engine and how you keep it in sync.",
+        "senior": "Adds Elasticsearch, indexes products asynchronously, uses an n-gram or completion suggester for autocomplete, and mentions relevance scoring.",
+        "staff": "Asks whether search is a feature or a core product before adding infrastructure; Postgres full-text search with a GIN index handles a few million rows and simple ranking. When a dedicated engine is warranted, designs the sync path as an async pipeline (CDC or outbox to indexer) with idempotent upserts and a documented staleness bound. Plans reindexing as a routine operation with aliases and blue-green indexes rather than an outage. Sizes shards by data volume, not by a round number, because too many shards is the classic cluster killer. Considers buying (Algolia, Typesense cloud) when the team is small and search quality matters more than control. Keeps the index stateless with respect to truth: a lost cluster is an inconvenience, not a data loss.",
+        "probes": [
+          "A product's price changes. How long until search shows the new price, and is that acceptable?",
+          "You need to change the index mapping. How do you do it without downtime?",
+          "When would you choose Algolia over running Elasticsearch yourself?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "What is an inverted index and why is it the foundation of search?",
+          "a": "A map from each term to the list of documents containing it, with positions and weights. A B-tree answers 'given an id, find the record'; an inverted index answers 'given words, find the records', which makes full-text search, relevance ranking, and fuzzy matching feasible in milliseconds."
+        },
+        {
+          "q": "Why must indexing be asynchronous and idempotent?",
+          "a": "Synchronous indexing couples write availability to the search cluster and adds its latency to every write. Async indexing via CDC or an outbox decouples them, and idempotent upserts keyed by document id and version let you replay or reorder events safely during recovery."
+        },
+        {
+          "q": "How do you change an index mapping with zero downtime?",
+          "a": "Create a new index with the new mapping, backfill it from the primary store, dual-write during the backfill, then atomically switch an alias from the old index to the new one. Readers never see a half-built index."
+        },
+        {
+          "q": "What goes wrong with too many shards in Elasticsearch?",
+          "a": "Each shard is a Lucene index with its own memory, file handles, and per-query overhead. Thousands of small shards exhaust heap and cluster state, slow every query by fan-out, and make rebalancing painful. Size shards in the tens of gigabytes and keep counts proportional to data, not to a guess."
         }
       ],
       "children": []

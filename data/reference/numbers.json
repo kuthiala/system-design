@@ -1,0 +1,204 @@
+{
+  "id": "numbers",
+  "title": "Numbers you must know cold",
+  "intro": "Estimation in an interview is not about precision; it is about speed and orders of magnitude. These anchors let you derive any number in under a minute. Memorize them, then practice the recipes until the arithmetic is boring.",
+  "sections": [
+    {
+      "id": "latency",
+      "title": "The latency ladder",
+      "intro": "Each rung is roughly 10x the one above. Knowing the rung tells you where the time goes.",
+      "rows": [
+        {"item": "L1 cache reference", "value": "1 ns", "note": "The unit everything else is measured against"},
+        {"item": "Branch mispredict", "value": "3 ns", "note": ""},
+        {"item": "L2 cache reference", "value": "4 ns", "note": ""},
+        {"item": "Mutex lock and unlock", "value": "20 ns", "note": "Uncontended"},
+        {"item": "Main memory reference", "value": "100 ns", "note": "Why cache misses dominate CPU-bound code"},
+        {"item": "Compress 1 KB with a fast codec", "value": "2 us", "note": "Compression is almost always worth it over a network"},
+        {"item": "Send 1 KB over 10 Gbps", "value": "1 us", "note": "Bandwidth is rarely the bottleneck; round trips are"},
+        {"item": "SSD random read", "value": "20 to 100 us", "note": "Modern NVMe at the low end"},
+        {"item": "Read 1 MB sequentially from memory", "value": "10 us", "note": ""},
+        {"item": "Round trip within a datacenter", "value": "0.5 ms", "note": "The cost of one microservice hop, before any work"},
+        {"item": "Read 1 MB sequentially from SSD", "value": "200 us to 1 ms", "note": ""},
+        {"item": "Redis GET (same AZ, including network)", "value": "0.2 to 0.5 ms", "note": "The number that makes caching worth it"},
+        {"item": "Postgres indexed point read (same AZ)", "value": "1 to 5 ms", "note": "Warm cache; 10x worse if it hits disk"},
+        {"item": "HDD seek", "value": "10 ms", "note": "Why spinning disks are for cold data only"},
+        {"item": "Read 1 MB sequentially from HDD", "value": "20 ms", "note": ""},
+        {"item": "Round trip, same continent", "value": "20 to 40 ms", "note": "US East to US West is about 60 to 70 ms"},
+        {"item": "Round trip, New York to London", "value": "70 to 80 ms", "note": "About 5 ms per 1,000 km of fiber, each way, doubled, plus routing"},
+        {"item": "Round trip, London to Sydney", "value": "250 to 300 ms", "note": "No software fixes this; only moving data closer"},
+        {"item": "TLS 1.3 handshake", "value": "1 round trip", "note": "TLS 1.2 is 2; QUIC can be 0 on resumption"},
+        {"item": "Lambda cold start", "value": "100 ms to 2 s", "note": "Language and package size dependent"},
+        {"item": "Human perceives as instant", "value": "under 100 ms", "note": "Under 1 s keeps flow; over 10 s loses attention"}
+      ]
+    },
+    {
+      "id": "throughput",
+      "title": "What one node can do",
+      "intro": "Use these to decide when a single instance is enough and when you must go horizontal.",
+      "rows": [
+        {"item": "Postgres or MySQL, simple indexed reads", "value": "10K to 50K QPS per primary", "note": "Larger instance and warm cache at the high end"},
+        {"item": "Postgres or MySQL, writes", "value": "5K to 20K TPS per primary", "note": "Durable commits; batching raises it"},
+        {"item": "Postgres connections", "value": "a few hundred", "note": "Use a pooler; thousands of app connections will exhaust it"},
+        {"item": "Redis, single node", "value": "100K to 1M ops/sec", "note": "Single-threaded for commands; pipelining helps"},
+        {"item": "Memcached, single node", "value": "1M+ ops/sec", "note": "Multi-threaded, simpler data model"},
+        {"item": "Kafka, per broker", "value": "100 MB/s to 1 GB/s", "note": "Hundreds of thousands of small messages per second per broker"},
+        {"item": "Kafka, per partition", "value": "10 MB/s or so", "note": "Partition count sets consumer parallelism"},
+        {"item": "Cassandra or ScyllaDB, per node", "value": "10K to 100K writes/sec", "note": "Scylla at the high end on good hardware"},
+        {"item": "Elasticsearch, per node", "value": "a few thousand queries/sec", "note": "Highly dependent on query complexity and index size"},
+        {"item": "Nginx or Envoy, per core", "value": "tens of thousands of RPS", "note": "A single well-configured node can proxy 100K+ RPS"},
+        {"item": "WebSocket connections per node", "value": "100K to 1M", "note": "Memory per connection (10 to 100 KB) is the limit"},
+        {"item": "Application server (JVM, Go), per instance", "value": "1K to 10K RPS", "note": "For requests doing real work with a database call"},
+        {"item": "Sidekiq-style job worker", "value": "hundreds to thousands of jobs/sec per node", "note": "Shopify runs billions per day on this model"},
+        {"item": "Object storage (S3) per prefix", "value": "3,500 PUT and 5,500 GET per second", "note": "Scales with prefix partitioning; effectively unlimited"}
+      ]
+    },
+    {
+      "id": "sizes",
+      "title": "Sizes and growth",
+      "intro": "Storage math is where candidates lose a minute. Round aggressively.",
+      "rows": [
+        {"item": "Seconds in a day", "value": "86,400 (call it 100K)", "note": "1M requests/day is about 12 RPS; 100M/day is about 1,200 RPS"},
+        {"item": "Seconds in a month", "value": "2.6 million", "note": "Seconds in a year: 31.5 million"},
+        {"item": "Powers of two", "value": "2^10 = 1K, 2^20 = 1M, 2^30 = 1G, 2^40 = 1T", "note": "A 64-bit id has 1.8 x 10^19 values"},
+        {"item": "ASCII character", "value": "1 byte", "note": "UTF-8 is 1 to 4 bytes; assume 2 for mixed text"},
+        {"item": "UUID", "value": "16 bytes binary, 36 as text", "note": "Use 8-byte Snowflake ids when indexes matter"},
+        {"item": "Timestamp", "value": "8 bytes", "note": ""},
+        {"item": "A tweet-sized record with metadata", "value": "about 1 KB", "note": "Text plus ids, timestamps, counters"},
+        {"item": "A typical compressed photo", "value": "200 KB to 2 MB", "note": "Thumbnails are 10 to 50 KB"},
+        {"item": "A minute of 1080p video", "value": "50 to 100 MB", "note": "Streaming at 5 Mbps is about 40 MB per minute"},
+        {"item": "A row with 20 columns in Postgres", "value": "200 bytes to 1 KB", "note": "Plus index overhead, often as large as the row"},
+        {"item": "Postgres comfortable single-instance size", "value": "a few TB", "note": "Beyond that, backups and vacuum become operational problems"},
+        {"item": "Redis working set per node", "value": "tens to a few hundred GB", "note": "Memory is the budget; cluster past that"},
+        {"item": "A log line", "value": "200 bytes to 2 KB", "note": "1K RPS with 5 lines each is about 1 TB per week"}
+      ]
+    },
+    {
+      "id": "availability",
+      "title": "Nines to minutes",
+      "intro": "Say the downtime out loud when you propose a target; it makes the cost visible.",
+      "rows": [
+        {"item": "99%", "value": "7.3 hours per month", "note": "Internal tools, batch systems"},
+        {"item": "99.9%", "value": "43 minutes per month", "note": "Standard consumer app; one bad deploy a month"},
+        {"item": "99.95%", "value": "22 minutes per month", "note": "Typical B2B SaaS contract"},
+        {"item": "99.99%", "value": "4.4 minutes per month", "note": "Requires automated failover; humans are too slow"},
+        {"item": "99.999%", "value": "26 seconds per month", "note": "Telecom, payments core; multi-region active-active"},
+        {"item": "Serial composition", "value": "multiply availabilities", "note": "Three 99.9% dependencies in series give 99.7%"},
+        {"item": "Parallel redundancy", "value": "1 minus the product of failure rates", "note": "Two independent 99% replicas give 99.99% if failover is instant"},
+        {"item": "Each extra nine costs", "value": "roughly 3 to 10x", "note": "In infrastructure, process, and people"}
+      ]
+    },
+    {
+      "id": "cost",
+      "title": "Cloud price anchors",
+      "intro": "Approximate on-demand list prices as of the mid 2020s. Use them for relative comparisons, not invoices.",
+      "rows": [
+        {"item": "General-purpose vCPU-hour", "value": "about $0.04 to $0.05", "note": "A 4 vCPU, 16 GB instance is about $150 per month"},
+        {"item": "Reserved or savings plan discount", "value": "30 to 60%", "note": "One to three year commitment"},
+        {"item": "Spot discount", "value": "60 to 90%", "note": "With interruption; for stateless and batch"},
+        {"item": "ARM (Graviton) versus x86", "value": "20 to 40% cheaper per unit of work", "note": "For most workloads"},
+        {"item": "Object storage, hot tier", "value": "about $0.023 per GB-month", "note": "1 TB is about $23 per month"},
+        {"item": "Object storage, archive tier", "value": "about $0.001 to $0.004 per GB-month", "note": "Retrieval takes hours and costs extra"},
+        {"item": "Block storage (SSD)", "value": "about $0.08 to $0.10 per GB-month", "note": "Plus IOPS charges on provisioned tiers"},
+        {"item": "Egress to internet", "value": "about $0.05 to $0.09 per GB", "note": "The cloud's exit toll; 100 TB a month is $5K to $9K"},
+        {"item": "Cross-AZ transfer", "value": "about $0.01 per GB each direction", "note": "The invisible line item for chatty services"},
+        {"item": "Managed Postgres (medium instance, multi-AZ)", "value": "a few hundred to a few thousand dollars per month", "note": "Storage and IOPS extra"},
+        {"item": "Managed Redis (tens of GB)", "value": "a few hundred dollars per month", "note": ""},
+        {"item": "Log ingestion (hosted observability)", "value": "about $0.10 to $0.50 per GB", "note": "Why sampling and retention tiers exist"},
+        {"item": "A100 or H100 GPU hour", "value": "$2 to $8 on demand", "note": "Serving a 70B model needs two or more"},
+        {"item": "LLM API, frontier model", "value": "dollars per million tokens", "note": "Small models are 10 to 50x cheaper; route by task"},
+        {"item": "Engineer, fully loaded", "value": "$20K to $30K per month", "note": "Often the real cost of a self-hosted anything"}
+      ]
+    }
+  ],
+  "recipes": [
+    {
+      "name": "Requests per second from daily users",
+      "steps": [
+        "DAU times actions per user per day gives requests per day.",
+        "Divide by 100K (seconds in a day, rounded) for average RPS.",
+        "Multiply by the peak factor: 3 to 5 for consumer, 5 to 10 for B2B, up to 100 for seasonal retail."
+      ],
+      "example": "50M DAU, 10 actions each: 500M per day, 5K RPS average, 25K RPS at peak for a consumer app."
+    },
+    {
+      "name": "Storage from write rate",
+      "steps": [
+        "Writes per day times bytes per record gives bytes per day.",
+        "Multiply by 365 for a year, then by retention years.",
+        "Add 50 to 100 percent for indexes and replication; multiply by replica count for total footprint."
+      ],
+      "example": "10M writes per day at 1 KB: 10 GB per day, 3.65 TB per year, about 7 TB with indexes, 21 TB across three replicas."
+    },
+    {
+      "name": "Bandwidth from traffic",
+      "steps": [
+        "RPS times average response size gives bytes per second.",
+        "Multiply by 8 for bits; compare against NIC and CDN capacity.",
+        "Multiply by seconds per month for egress cost at about $0.08 per GB."
+      ],
+      "example": "20K RPS at 50 KB: 1 GB/s or 8 Gbps; about 2.6 PB per month, which is why a CDN pays for itself."
+    },
+    {
+      "name": "Cache size from working set",
+      "steps": [
+        "Estimate the fraction of data read repeatedly (often 20 percent of keys take 80 percent of reads).",
+        "Multiply hot keys by value size for memory needed.",
+        "Target a hit rate; if the working set exceeds node memory, cluster or add a local L1."
+      ],
+      "example": "100M users, 20 percent active daily, 2 KB profile each: 40 GB of hot profiles, which fits one Redis node with headroom."
+    },
+    {
+      "name": "Shard count from write rate and size",
+      "steps": [
+        "Take peak writes per second divided by what one primary comfortably sustains (say 10K).",
+        "Take total data divided by comfortable size per shard (say 1 to 2 TB).",
+        "Use the larger of the two, round up to a power of two, and allocate 4 to 8x that many logical shards for future moves."
+      ],
+      "example": "80K peak writes per second and 12 TB: 8 shards by writes, 8 by size; run 8 physical nodes with 64 logical shards."
+    },
+    {
+      "name": "Servers from throughput",
+      "steps": [
+        "Peak RPS divided by RPS per instance (measured, or 1K to 5K for a typical service with a DB call).",
+        "Divide by target utilization (0.6 to 0.7) for headroom.",
+        "Add one more per availability zone so losing a zone keeps capacity."
+      ],
+      "example": "30K peak RPS at 2K per instance: 15 instances, 22 at 70 percent utilization, 25 across three zones."
+    },
+    {
+      "name": "Availability of a design",
+      "steps": [
+        "List the components a request touches in series and multiply their availabilities.",
+        "For redundant pairs, compute 1 minus (failure rate squared) and use that in the series.",
+        "Compare with the SLO and name the weakest component."
+      ],
+      "example": "Gateway 99.99, service 99.95, database 99.95, third-party 99.9: product is about 99.79 percent, and the third party is the cap."
+    }
+  ],
+  "drill": [
+    {"q": "Round trip within a datacenter?", "a": "About 0.5 ms. That is the price of one service hop before any work is done."},
+    {"q": "Round trip New York to London?", "a": "70 to 80 ms. About 5 ms per 1,000 km of fiber each way, doubled, plus routing overhead."},
+    {"q": "Redis GET including the network, same AZ?", "a": "0.2 to 0.5 ms."},
+    {"q": "Postgres indexed point read, warm cache?", "a": "1 to 5 ms, and about 10x worse on a disk read."},
+    {"q": "Seconds in a day, and the shortcut?", "a": "86,400; call it 100K. So 1M requests per day is about 12 RPS."},
+    {"q": "Writes per second one Postgres primary comfortably sustains?", "a": "5K to 20K TPS depending on instance and durability settings."},
+    {"q": "Ops per second for one Redis node?", "a": "100K to 1M."},
+    {"q": "99.9 percent availability in downtime per month?", "a": "About 43 minutes."},
+    {"q": "99.99 percent availability in downtime per month?", "a": "About 4.4 minutes, which is beyond what humans can achieve manually."},
+    {"q": "Three serial dependencies at 99.9 percent: composed availability?", "a": "About 99.7 percent."},
+    {"q": "Hot object storage price per GB-month?", "a": "About $0.023; 1 TB is about $23 per month."},
+    {"q": "Internet egress price per GB?", "a": "About $0.05 to $0.09; 100 TB per month is $5K to $9K."},
+    {"q": "Cross-AZ transfer price?", "a": "About $0.01 per GB in each direction; the invisible line item."},
+    {"q": "Spot discount range?", "a": "60 to 90 percent, with interruption."},
+    {"q": "A minute of 1080p video?", "a": "50 to 100 MB stored; about 40 MB streamed at 5 Mbps."},
+    {"q": "WebSocket connections per node?", "a": "100K to 1M, bounded by memory per connection."},
+    {"q": "Peak-to-average factor for B2B SaaS?", "a": "5 to 10x, driven by the Monday 9am workday peak."},
+    {"q": "Peak-to-average factor for seasonal e-commerce?", "a": "50 to 100x on Black Friday."},
+    {"q": "How many values in a 64-bit id space?", "a": "About 1.8 x 10^19."},
+    {"q": "TLS 1.3 handshake round trips?", "a": "One. TLS 1.2 is two. QUIC resumption can be zero."},
+    {"q": "S3 request rate per prefix?", "a": "3,500 PUTs and 5,500 GETs per second, and it scales with more prefixes."},
+    {"q": "Kafka throughput per broker?", "a": "Hundreds of MB/s to about 1 GB/s; hundreds of thousands of small messages per second."},
+    {"q": "Lambda cold start range?", "a": "100 ms to 2 s depending on runtime and package size."},
+    {"q": "Latency a human perceives as instant?", "a": "Under 100 ms. Under 1 s keeps flow; over 10 s loses attention."}
+  ]
+}

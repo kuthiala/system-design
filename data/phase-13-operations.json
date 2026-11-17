@@ -11,6 +11,7 @@
     "hyper"
   ],
   "short": "Manual deploy → CI/CD → GitOps → platform engineering — deploy frequency is the heartbeat of engineering health",
+  "tldr": "Operations is everything between 'code written' and 'code reliably running'. The ladder is manual deploys, CI/CD, GitOps, and platform engineering. The single metric that predicts health is deploy frequency: teams that ship small changes often have fewer and smaller incidents than teams that ship big releases rarely.",
   "keyInsight": "The teams that deploy the most often have the fewest outages — not despite the frequency, but because of it. Small changes are easy to debug, easy to roll back, and easy to reason about. Large batched releases are bombs with unknown blast radii.",
   "mentalModel": "Think of deployments like exercise. Deploying once a month is like running a marathon with no training — painful, risky, and you dread it. Deploying many times a day is like a daily jog — routine, low-risk, and you barely think about it. The deploy pipeline is the gym equipment that makes the daily jog possible: CI/CD removes manual steps, feature flags let you separate 'deploy' from 'release,' and canary rollouts let you test with real traffic before committing. The goal is to make shipping code as boring and safe as saving a file.",
   "detail": {
@@ -289,5 +290,33 @@
       ]
     }
   },
+  "interview": {
+    "prompt": "'How does code get to production?' The interviewer is testing whether you treat deployment as a design concern or someone else's job.",
+    "senior": "Describes CI running tests, a pipeline deploying to staging then production, blue-green or canary rollouts, and rollback on failure.",
+    "staff": "Designs for deploy frequency as a reliability lever: trunk-based development, every merge deployable, small batches, feature flags that separate deploy from release, and progressive delivery (canary by percentage with automatic rollback on SLO burn). Treats infrastructure as code with the same review and pipeline as application code, and GitOps so the repository is the source of truth for what is running. Measures with the DORA metrics and uses change failure rate and time to restore to decide where to invest. Plans the platform layer: golden-path templates, self-service environments, and paved roads that make the safe way the easy way. Addresses the human loop: on-call rotation, runbooks linked from alerts, blameless postmortems with tracked action items, and game days. Knows Knight Capital as the cost of a partial, manual deploy.",
+    "probes": [
+      "A deploy is 20 minutes in and error rate is creeping up. What happens automatically, and what needs a human?",
+      "How do you deploy a change that needs both a schema migration and new code?",
+      "Which DORA metric is worst on your team, and what would you do about it first?"
+    ]
+  },
+  "quiz": [
+    {
+      "q": "What are the four DORA metrics?",
+      "a": "Deployment frequency, lead time for changes, change failure rate, and time to restore service. Elite teams deploy many times a day with lead times under an hour, failure rates under 15 percent, and restores under an hour."
+    },
+    {
+      "q": "Why does deploying more often reduce outages?",
+      "a": "Small changes are easy to review, easy to test, easy to diagnose when they fail, and easy to roll back. Large batched releases combine dozens of changes so any failure has an unknown cause and an all-or-nothing rollback. Frequency forces automation, which removes the manual steps that cause most incidents."
+    },
+    {
+      "q": "What is the difference between deploying and releasing, and why separate them?",
+      "a": "Deploying puts code on servers; releasing exposes it to users. Feature flags let you deploy dark, test in production, ramp by percentage, and turn a feature off in seconds without a rollback. This separation makes deploys routine and releases controlled."
+    },
+    {
+      "q": "What happened at Knight Capital in 2012?",
+      "a": "A manual deploy to eight servers reached only seven; the eighth ran old code that reactivated a dormant feature and sent millions of erroneous orders, losing 440 million dollars in 45 minutes. Lessons: automate deploys, verify every node, remove dead code, and have a kill switch."
+    }
+  ],
   "children": []
 }

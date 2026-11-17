@@ -11,6 +11,9 @@
     "hyper"
   ],
   "short": "Unit → integration → load → chaos → continuous verification — the portfolio that makes deploys boring",
+  "tldr": "A testing strategy is a portfolio: fast unit tests for logic, integration tests for boundaries, contract tests between services, load tests for capacity, chaos for resilience, and progressive delivery that treats production as the final test environment. Each layer catches a different bug class at a different cost.",
+  "keyInsight": "Past a certain scale, pre-production testing cannot prove the system works because no staging environment matches production's data, traffic, and failure modes. The strategy shifts from preventing all bugs before deploy to detecting and containing them within minutes after, which is why canaries, flags, and fast rollback are testing tools.",
+  "mentalModel": "Airline safety. Engineers test components on a bench (unit), assemble and test systems together (integration), certify that the engine fits the airframe's spec (contract), fly loaded test flights (load), practice engine-out landings in simulators (chaos), and still monitor every real flight with a black box and the ability to divert (production verification). No single layer makes flying safe; the portfolio does.",
   "detail": {
     "what": "Testing strategy is the portfolio of verification activities that gives your team confidence to deploy to production many times a day without fear. It's not just 'writing tests' — it's a deliberate, layered defense system where each type of test catches a different class of bug at a different cost and speed. The portfolio includes: (1) Unit tests — verify individual functions/classes in isolation, run in milliseconds, catch logic bugs, form the base of the pyramid. (2) Integration tests — verify that components work together (service + database, service + cache, service + downstream API), run in seconds, catch wiring bugs. (3) Contract tests — verify that the API contract between services hasn't broken, without full integration — the most cost-effective test type for microservices. (4) Load tests — verify that the system handles projected (and 2–10× projected) traffic without breaking SLOs, catch capacity/concurrency bugs. (5) Chaos engineering — verify that the system survives real-world failures (instance death, network partition, disk full, dependency timeout), catch resilience bugs. (6) Production verification — canary deploys, synthetic monitoring, and progressive rollout that continuously verify the system in the environment that matters most. The traditional 'test pyramid' (many unit tests, fewer integration, fewest E2E) is correct for monoliths but misleading for distributed systems: in microservices, the bugs that cause outages are almost always at the boundaries between services (wrong data format, unexpected null, changed API response shape), and unit tests don't catch those. Contract tests and integration tests are the workhorses of distributed system reliability.",
     "why": "Test strategy directly determines two things: how fast you can ship (deploy frequency) and how often shipping causes pain (change failure rate). DORA research — the largest study of software delivery performance, spanning 32,000+ teams over 8 years — shows that elite teams deploy on demand (multiple times per day), have <15% change failure rate, and recover from incidents in <1 hour. Low-performing teams deploy monthly, have 31–45% failure rate, and take over a week to recover. The difference isn't talent — it's test strategy. Elite teams have automated test suites that catch bugs before production, progressive delivery that limits blast radius, and monitoring that detects problems in seconds. Counter-intuitively, teams that deploy more often have fewer outages because: each change is small (easier to debug), the deploy process is well-practiced (fewer manual mistakes), and problems are detected quickly (less time to accumulate damage). Testing isn't about preventing all bugs — it's about making bugs cheap, fast to detect, and easy to fix. A bug caught by a unit test costs 1 minute. Caught by an integration test, 10 minutes. Caught in staging, 1 hour. Caught in production by monitoring, 1 day. Caught by a customer support ticket, 1 week. Caught by a compliance audit, 1 quarter. Every layer of testing shifts bugs left (earlier in the pipeline) where they're cheaper to fix.",
@@ -146,6 +149,34 @@
       ]
     }
   },
+  "interview": {
+    "prompt": "'How would you test this?' is rarely asked directly, but 'how do you know a deploy is safe?' and 'how do you know it handles peak?' are testing questions.",
+    "senior": "Describes the test pyramid, CI running unit and integration tests, a staging environment, load testing before launch, and canary deploys.",
+    "staff": "Allocates the portfolio by where bugs actually come from: at service boundaries (contract tests), under load (capacity tests against production-like data), and in failure handling (chaos). Points out that in microservices the pyramid becomes a diamond because most bugs are integration bugs. Treats flaky tests as a reliability incident for the test suite with ownership and quarantine. Reduces reliance on staging and invests in production safety: feature flags, canaries with automated SLO analysis, shadow traffic, and rollback measured in seconds. Builds load testing into the release cycle with realistic key distributions. Runs game days and chaos experiments with blast radius controls. Measures the strategy by change failure rate and time to detect, not by coverage percentage.",
+    "probes": [
+      "Your staging environment passed and production failed. Name the three most likely reasons.",
+      "What is your test that service A's change will not break service B, without deploying both?",
+      "How much production traffic goes to a canary, for how long, and what decides promotion?"
+    ]
+  },
+  "quiz": [
+    {
+      "q": "Why does the test pyramid become a diamond in microservices?",
+      "a": "Most defects occur at service boundaries (wrong assumptions about contracts, timeouts, partial failures), not inside a single service's logic. Integration and contract tests become the bulk of the portfolio, with unit tests for pure logic and a thin layer of end-to-end tests."
+    },
+    {
+      "q": "What is a flaky test's real cost?",
+      "a": "Each flake teaches engineers to retry or ignore failures, which trains them to ignore the real failure too. Flaky tests erode the signal of the whole suite. Treat them as bugs with owners, quarantine them from the blocking pipeline, and fix or delete within days."
+    },
+    {
+      "q": "Why does staging fail to predict production?",
+      "a": "Different data volume and distribution, different traffic patterns and concurrency, different infrastructure sizing, missing third-party behavior, and no real failures. Staging can verify correctness of a path; it cannot verify behavior under production conditions."
+    },
+    {
+      "q": "What makes a canary deploy a test?",
+      "a": "A small fraction of real traffic hits the new version while automated analysis compares its error rate and latency against the baseline, with automatic rollback on degradation. It tests the exact conditions staging cannot reproduce, with a bounded blast radius."
+    }
+  ],
   "children": [
     {
       "name": "Load & Capacity",
@@ -159,6 +190,9 @@
         "hyper"
       ],
       "short": "k6/Locust → distributed → game days — find the breaking point before your users do",
+      "tldr": "Load testing answers 'where does this break?' before users do. Load tests verify projected peak, stress tests find the ceiling, soak tests find leaks, spike tests find autoscaling gaps. Realism of data and key distribution matters more than raw request count.",
+      "keyInsight": "A load test with uniform random keys tests your cache, not your system. Real traffic is skewed: a few hot keys, a few whale tenants, a few expensive endpoints. If the test does not reproduce the skew, the first real peak will find the hot partition the test never touched.",
+      "mentalModel": "A building inspector loading a floor with sandbags. The point is not to confirm it holds the expected weight; it is to find the weight at which it cracks, which beam goes first, and whether it sags slowly (leak) or snaps (cliff). Loading the sandbags evenly tells you nothing about the corner where the piano will sit.",
       "detail": {
         "what": "Load and capacity testing verifies that your system handles the projected traffic — and 2–10× projected traffic — without breaking SLOs. It answers the most important operational question: 'Where does this system break?' There are four types: (1) Load test — sustained traffic at projected peak for 30–60 minutes. Verifies steady-state behavior under expected load. (2) Stress test — ramp traffic beyond projected peak (2×, 5×, 10×) to find the breaking point ('knee'). Tells you your capacity ceiling. (3) Spike test — sudden burst from baseline to 10× in seconds. Verifies autoscaling speed and load shedding behavior. (4) Soak test — sustained moderate load for 8–24 hours. Finds memory leaks, connection pool exhaustion, log disk fill, and other slow-burn failures that don't appear in short tests. The output of load testing is not 'pass/fail' — it's a capacity profile: 'this system handles 5,000 RPS at p99 <200ms, degrades gracefully to 8,000 RPS at p99 <500ms, and falls over at 12,000 RPS.' This profile drives capacity planning: provision to operate at 60% of the knee, with autoscaling up to 80%.",
         "why": "Capacity bugs are unique: they cannot be found by any other type of testing. A function that works correctly at 1 RPS can deadlock at 1,000 RPS due to lock contention. A database query that returns in 5ms with 100K rows takes 5 seconds with 10M rows. A connection pool of 10 is fine at 50 RPS but exhausted at 500 RPS when a downstream service adds 100ms of latency. These bugs are invisible in unit tests, integration tests, and even manual testing — they only appear under load. Discovering them in production is the most expensive and humiliating failure mode: your biggest day (launch, Black Friday, viral moment) becomes your worst day. Load testing before launch is not optional — it's the difference between a celebration and a disaster. Regular load testing (weekly or before each release) is also essential because capacity changes over time: new features add queries, data grows, and what worked at 1M rows may not work at 10M.",
@@ -248,6 +282,34 @@
           "desc": "Before major GitHub Actions launches, GitHub replays production traffic at 10× against a canary environment for 48 hours. They discovered multiple scaling bottlenecks (queue backup, connection pool exhaustion, hot partitions) that were invisible at normal traffic levels but would have caused outages at launch."
         }
       ],
+      "interview": {
+        "prompt": "'How do you know it handles Black Friday?' The interviewer wants a method, not 'we load test'.",
+        "senior": "Uses k6 or Locust to generate projected peak traffic against staging, watches latency and error rates, and scales accordingly.",
+        "staff": "Defines the target from requirements (peak RPS times a safety factor, per endpoint mix) and builds scripts that replay or model real traffic shape: endpoint mix, key skew, tenant skew, think times, and ramp profiles. Runs against production-like data volume because query plans change with size. Runs four test types with distinct goals and watches the whole system, not just the API: database saturation, replication lag, queue depth, connection pools, GC. Finds the breaking point and the first component to fail, then fixes and repeats. Moves to production load testing with shadow traffic or dark launches when staging cannot be representative. Makes it continuous: a capacity test in the release pipeline and a trend of headroom over time.",
+        "probes": [
+          "Your load test passed at 2x peak. What about it could still be wrong?",
+          "What is the first component you expect to saturate, and what metric shows it?",
+          "How do you load test in production without hurting users?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "Distinguish load, stress, soak, and spike tests.",
+          "a": "Load: sustained projected peak to verify SLOs hold. Stress: ramp beyond peak to find the breaking point and the first failing component. Soak: moderate load for hours to find leaks and slow degradation. Spike: sudden jumps to test autoscaling lag and load shedding."
+        },
+        {
+          "q": "Why does a single-keyspace or uniform-key load test mislead?",
+          "a": "Real traffic concentrates on hot keys, hot tenants, and hot partitions. Uniform keys spread load evenly, hitting the cache and every shard equally, so hot-partition failures and cache stampedes never appear. Model the skew from production traffic logs."
+        },
+        {
+          "q": "What should you monitor during a load test besides the API's latency?",
+          "a": "Database CPU, I/O, and lock waits; replication lag; connection pool saturation; queue depth and age; cache hit rate; GC pauses; and error rates per dependency. The API's p99 tells you something broke; these tell you what."
+        },
+        {
+          "q": "How do you load test production safely?",
+          "a": "Shadow traffic (duplicate real requests to the new path without serving responses), dark launches behind flags, synthetic traffic tagged so it can be excluded from business metrics and rate-limited, and a kill switch that stops the test the moment SLOs degrade."
+        }
+      ],
       "related": [
         {
           "id": "req-traffic",
@@ -271,6 +333,9 @@
         "hyper"
       ],
       "short": "Inject failures · validate resilience · because hope is not a strategy",
+      "tldr": "Chaos engineering injects real failures (killed instances, partitions, latency, full disks) in a controlled way to verify that resilience mechanisms actually work. Start with a hypothesis, limit the blast radius, run in staging then production, and treat every surprise as a bug in the system, not the experiment.",
+      "keyInsight": "Every resilience mechanism you have never exercised should be assumed broken. Failover scripts rot, circuit breaker thresholds drift, runbooks go stale. Chaos is not about causing failure; it is about discovering which of your safety nets are already missing before the night you need them.",
+      "mentalModel": "Fire drills. Nobody learns to evacuate by reading the plan; they learn by walking the route with the alarm ringing. A good drill is announced, has marshals, and is cancelled if there is a real fire. A company that has never drilled does not have an evacuation plan; it has a document.",
       "detail": {
         "what": "Chaos engineering is the discipline of deliberately injecting failures into your system — killing instances, partitioning networks, filling disks, slowing dependencies, corrupting data — to verify that your resilience mechanisms (circuit breakers, retries, failover, load shedding) actually work under real conditions. It's based on a simple premise: failures will happen in production (disks fail, networks partition, processes crash, dependencies go down). The only question is whether you've validated your system's response to those failures before they happen naturally, or whether the first real test of your failover is during an actual outage at 3am on a holiday weekend. Chaos engineering answers: 'If X fails, what happens?' — and ensures the answer is 'the system continues operating with minimal user impact' rather than 'we find out the hard way.' The practice was pioneered by Netflix (Chaos Monkey, 2010) out of necessity: running on AWS, where instance failures are routine, they needed confidence that any server could die at any moment without affecting the user experience. Today it's practiced by every major tech company and increasingly by enterprises.",
         "why": "Every system has resilience mechanisms — circuit breakers, health checks, auto-scaling, failover databases, redundant services. But how do you know they work? The answer, for most companies, is: you don't, because you've never tested them. Your circuit breaker is configured but has never tripped. Your auto-failover database has a standby that's never been promoted. Your load shedding config has numbers someone picked from a blog post. These mechanisms are theater until proven real. Chaos engineering is proof. It's the difference between 'our docs say we can survive an AZ failure' and 'we survived a real AZ failure last Tuesday during our chaos experiment.' The first time you test your disaster recovery should not be during an actual disaster. The psychological benefit is equally important: teams that practice chaos engineering are calmer during real incidents because they've seen the failure mode before, they know the recovery playbook works, and they've practiced the response. This confidence translates directly to faster MTTR (Mean Time To Recovery).",
@@ -334,6 +399,52 @@
           "desc": "Slack experienced a significant outage traced to a database migration that interacted poorly with their connection pooling under load. Their subsequent postmortem noted that their chaos experiments hadn't covered the specific interaction between schema changes and connection pool behavior under high connection churn. They expanded their chaos experiments to include database-layer failures (connection pool exhaustion, replication lag spikes, lock contention) — demonstrating that chaos engineering is not a checkbox but a continuously expanding practice that evolves with your system's failure modes."
         }
       ],
+      "pitfalls": [
+        {
+          "name": "Chaos without a hypothesis",
+          "desc": "Killing random instances to 'see what happens' produces noise and fear. Each experiment should state the expected behavior ('if the primary dies, failover completes within 30 seconds and no writes are lost') so the result is a pass, a fail, or a surprise, each with a clear next action."
+        },
+        {
+          "name": "No blast radius control",
+          "desc": "An experiment that takes down a whole region in production is an outage with a different name. Start with one instance, one AZ, one percent of traffic; have an abort switch; run during business hours with the owning team watching; and expand scope only as confidence grows."
+        },
+        {
+          "name": "Drills that teams prepare for",
+          "desc": "If the monthly game day is scheduled and announced, teams fix things the day before and revert the day after, so the drill measures preparation rather than steady state. Mix announced drills (for learning) with unannounced, automated, small-scope experiments (for truth)."
+        },
+        {
+          "name": "Ignoring the socio-technical half",
+          "desc": "The system failed over fine, but the on-call engineer could not find the runbook, the dashboard was wrong, and escalation took 40 minutes. Chaos experiments should test the human response (paging, runbooks, communication) as deliberately as the technical response."
+        }
+      ],
+      "interview": {
+        "prompt": "'How do you know your failover works?' At staff level, 'we tested it once' is not an answer.",
+        "senior": "Runs chaos experiments like Chaos Monkey in staging, kills instances and introduces latency, and verifies the system recovers.",
+        "staff": "Frames chaos as hypothesis-driven verification of specific resilience claims, each tied to an SLO. Builds a progression: staging experiments, then production with minimal blast radius and abort conditions, then continuous automated experiments on steady state. Covers the failure catalog beyond instance death: dependency latency, partial network partitions, DNS failure, certificate expiry, clock skew, disk full, a bad config push. Tests the human loop as part of the experiment. Treats every finding as a prioritized defect and tracks mean time to detect and recover across drills. Ties it to game days and DR tests with executive visibility because the hardest part is organizational permission to break things on purpose.",
+        "probes": [
+          "Design a chaos experiment for 'the cache cluster disappears'. Hypothesis, blast radius, abort condition, success metric.",
+          "What failure in this design have you never tested, and what do you expect to find?",
+          "How do you get permission to run chaos in production?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "What are the four parts of a well-formed chaos experiment?",
+          "a": "A steady-state hypothesis (what normal looks like, measured), a specific injected failure, a bounded blast radius with an abort condition, and a measurable expected outcome tied to an SLO. Without these it is vandalism, not engineering."
+        },
+        {
+          "q": "Why run chaos in production at all?",
+          "a": "Staging cannot reproduce production's data, traffic, configuration, and dependency behavior, so a failover that works in staging may fail in production. Production experiments with small blast radius are the only way to verify the real system, and they build the muscle to respond."
+        },
+        {
+          "q": "What did Netflix's Chaos Monkey change about engineering culture?",
+          "a": "By randomly terminating instances in production during business hours, it made instance failure an everyday event rather than an emergency, so every team designed for it by default. Resilience became a property engineers assumed they had to earn, not a hope."
+        },
+        {
+          "q": "Name five failure types beyond killing an instance that chaos should cover.",
+          "a": "Dependency latency and timeouts, network partitions (including asymmetric ones), DNS resolution failure, disk or memory exhaustion, clock skew, certificate expiry, and bad configuration or feature flag pushes."
+        }
+      ],
       "related": [
         {
           "id": "reliability",
@@ -358,6 +469,9 @@
         "hyper"
       ],
       "short": "Producer/consumer-driven contracts — the most cost-effective test in microservices",
+      "tldr": "Contract tests verify that a consumer's expectations of a provider's API hold, without running both services together. The consumer records what it needs; the provider verifies it can satisfy every consumer's contract in its own CI. It is the cheapest test that prevents the most common microservice incident: a breaking change deployed independently.",
+      "keyInsight": "In a service architecture, the most dangerous change is a provider's field rename that passes every test the provider owns. Contract tests move the consumer's assumptions into the provider's pipeline, so the provider cannot ship a change its consumers cannot survive.",
+      "mentalModel": "A power outlet standard. Appliance makers (consumers) build to a published plug shape; the utility (provider) tests every new socket design against the plug gauges on file. Nobody has to plug in every appliance in the country to know a new socket is safe, and a utility that changes the shape without updating the gauge is caught before any house goes dark.",
       "detail": {
         "what": "Contract testing verifies that the API contract between two services — the request/response shape, status codes, headers, and field types — hasn't been broken by a change in either service. Unlike integration tests (which require both services running together), contract tests run independently: the consumer defines what it expects from the producer (a 'contract'), and the producer verifies it can fulfill that contract without needing the consumer to be present. If a producer change would break a consumer's contract, the producer's CI fails — preventing the breaking change from being deployed. This catches the single most common microservices bug: a producer team changes an API (renames a field, removes a response field, changes a type) without realizing a consumer depends on it. The change passes all of the producer's own tests (because the producer's tests don't know about the consumer's expectations), gets deployed, and breaks the consumer in production. Contract tests close this gap. For event-driven systems, schema registries (Confluent Schema Registry for Avro, Buf for Protobuf) serve a similar purpose: they enforce that event schema changes are backward-compatible, preventing producers from publishing events that consumers can't parse.",
         "why": "In a microservices architecture, end-to-end tests that spin up all services and test user journeys are the intuitive answer to 'how do I verify everything works together?' But at scale, E2E tests are a trap: they're slow (spin up 10+ services, each with its own database), flaky (network timing, service startup order, test data setup failures), hard to debug (which of 10 services caused the failure?), and create coupling (a change in any service can break any E2E test). Google research showed that >50% of E2E test failures are due to infrastructure issues, not actual bugs. Contract tests provide 80–90% of the value of E2E tests at ~1% of the cost: they verify the critical thing (do services agree on the interface?) without the expensive thing (running everything together). Pact-style contract tests run in <5 seconds per service boundary. An E2E test covering the same flow takes 5–15 minutes. For a system with 50 service boundaries, that's 4 minutes of contract testing vs 4+ hours of E2E. The ROI is overwhelming.",
@@ -421,6 +535,62 @@
           "to": "hyper",
           "trigger": "Maintaining contracts manually across 500+ services is unsustainable, or SDK versioning across consumers is causing deployment coordination overhead",
           "action": "Move to auto-generated SDKs from schemas. Build a CI pipeline that: (1) detects schema changes in a producer's PR, (2) runs compatibility checks against all consumer contracts, (3) auto-generates updated client libraries, (4) opens PRs in consumer repos with the updated SDK. This eliminates the human coordination overhead of contract management. Deploy a schema governance team (or automated bot) that reviews and approves schema changes for backward/forward compatibility. This takes 2–3 months to build but transforms cross-service coordination from a human process to an automated one."
+        }
+      ],
+      "pitfalls": [
+        {
+          "name": "Testing the provider's schema instead of the consumer's need",
+          "desc": "A contract that snapshots the provider's full response ties every consumer to every field and makes any change a break. Consumers should record only the fields and behaviors they actually use, so providers can evolve everything else freely."
+        },
+        {
+          "name": "Contracts nobody runs",
+          "desc": "Consumers write contracts but providers never verify them in CI, so they are documentation that drifts. The provider's pipeline must fetch all consumer contracts from a broker and fail the build on any violation, with a 'can I deploy' check that compares versions actually in production."
+        },
+        {
+          "name": "Contract tests as integration tests in disguise",
+          "desc": "Teams spin up the real provider with a database to run contracts, which is slow, flaky, and defeats the purpose. Contract verification should run against the provider with stubbed dependencies, testing the API surface, not the whole stack."
+        },
+        {
+          "name": "Skipping event contracts",
+          "desc": "Contracts are applied to HTTP APIs but not to the messages on Kafka or SQS, so a producer changes an event schema and consumers fail at runtime. Message schemas need the same consumer-driven contracts or a schema registry with compatibility rules."
+        }
+      ],
+      "examples": [
+        {
+          "name": "Pact at scale in financial services",
+          "desc": "Banks with hundreds of services adopted consumer-driven contracts with a Pact broker so that any provider build knows which consumer versions in production depend on it and refuses to deploy a breaking change. The 'can I deploy' gate replaced a release coordination meeting with an automated check."
+        },
+        {
+          "name": "Confluent Schema Registry compatibility modes",
+          "desc": "Event producers register Avro or Protobuf schemas and the registry enforces backward or forward compatibility on every new version, rejecting a producer change that would break existing consumers. It is contract testing for the event stream, enforced at publish time."
+        }
+      ],
+      "interview": {
+        "prompt": "'Service A changes its response. How do you know B still works, without deploying both to staging?'",
+        "senior": "Uses consumer-driven contract tests with Pact: the consumer defines expectations, the provider verifies them in CI.",
+        "staff": "Explains the mechanics and the organizational effect: contracts turn an informal dependency into a verified one, shift the burden of compatibility to the provider where it belongs, and let teams deploy independently. Scopes contracts to what consumers use so providers retain freedom. Adds a broker with 'can I deploy' checks against production versions. Extends contracts to async messages through a schema registry with compatibility rules. Combines with additive-only evolution and deprecation windows so breaking changes become planned migrations. Knows when contracts are overkill (a handful of services owned by one team) and when they are essential (dozens of teams, independent deploys).",
+        "probes": [
+          "Who owns the contract: consumer or provider, and why?",
+          "A consumer in production is on version 3 and the provider wants to ship version 10. How does the pipeline decide?",
+          "How do you apply this to Kafka events?"
+        ]
+      },
+      "quiz": [
+        {
+          "q": "What is consumer-driven contract testing?",
+          "a": "Each consumer records the requests it makes and the parts of responses it depends on as a contract. The provider's CI replays those requests against the provider and verifies the responses satisfy every consumer's contract. Breaking changes fail the provider's build before deploy."
+        },
+        {
+          "q": "Why should contracts capture only what the consumer uses?",
+          "a": "A contract over the full response couples consumers to fields they ignore, turning every provider change into a break. Minimal contracts let the provider change anything not in use, which is the whole point of independent evolution."
+        },
+        {
+          "q": "What does a contract broker's 'can I deploy' check do?",
+          "a": "It knows which consumer and provider versions are deployed in each environment and whether every pair has a verified contract. Before a deploy, it answers whether this version is compatible with everything currently in production, replacing manual release coordination."
+        },
+        {
+          "q": "How do you get contract guarantees for events on a message bus?",
+          "a": "A schema registry with enforced compatibility modes: producers register schemas, and the registry rejects new versions that would break existing consumers (backward compatibility for consumers reading old and new, forward for the reverse). It is the event equivalent of a verified contract."
         }
       ],
       "related": [

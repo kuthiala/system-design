@@ -1,0 +1,215 @@
+/* Layout: top nav + either the page view or the map (#app) */
+body{display:flex;flex-direction:column}
+#topnav{display:flex;align-items:center;gap:4px;height:44px;padding:0 14px;background:#0d1117;border-bottom:1px solid #1e2433;flex-shrink:0;z-index:20}
+#topnav .brand{font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#7c5af6;margin-right:14px}
+#topnav a{color:#94a3b8;text-decoration:none;font-size:13px;padding:6px 10px;border-radius:6px}
+#topnav a:hover{color:#e2e8f0;background:#151b28}
+#topnav a.on{color:#fff;background:#1e2433}
+#due-badge{background:#7c5af6;color:#fff;border-radius:9px;font-size:10px;padding:1px 6px;margin-left:4px}
+#view{flex:1;overflow-y:auto}
+#app{display:none;height:calc(100dvh - 44px)}
+body.on-map #app{display:flex}
+body.on-map #view{display:none}
+#dp-open-lesson{color:#a78bfa;font-size:12px;text-decoration:none;margin-left:auto;white-space:nowrap}
+
+/* Pages */
+.page{max-width:820px;margin:0 auto;padding:32px 24px 80px;line-height:1.65;font-size:15px}
+.page a{color:#a78bfa}
+.page p{margin:0 0 12px}
+.page ul,.page ol{margin:0 0 12px 22px}
+.page h3{font-size:15px;margin:8px 0 6px}
+.lesson-page{position:relative}
+
+/* Lesson building blocks */
+.lesson h1,.ls-head h1{font-size:28px;margin:6px 0}
+.ls-head{margin-bottom:20px}
+.ls-short{color:#94a3b8}
+.ls-crumbs{font-size:12px;margin-bottom:6px}
+.crumb-sep{margin:0 6px;color:#475569}
+.ls-kicker{display:flex;gap:10px;align-items:center;font-size:12px;color:#64748b}
+.phase-chip{border:1px solid var(--c,#7c5af6);color:var(--c,#a78bfa);border-radius:10px;padding:1px 8px}
+.ls-icon{margin-right:8px}
+.ls{margin:28px 0}
+.ls h2{font-size:18px;margin-bottom:10px;color:#f1f5f9}
+.ls-tldr,.ls-model,.drill-card{background:#111827;border:1px solid #1e2433;border-radius:10px;padding:14px 16px;margin:14px 0}
+.ls-tldr-lbl,.ls-model-lbl,.ls-insight-lbl,.mini-lbl,.iv-col-lbl,.ap-lbl{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#7c5af6;margin:6px 0 4px}
+.ls-insight{border-left:3px solid #7c5af6;padding:8px 14px;margin:14px 0;background:#0f1320}
+.ls-hint{color:#64748b;font-size:13px}
+.iv-cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.iv-col{background:#111827;border-radius:8px;padding:10px 12px}
+.iv-col.staff{border:1px solid #7c5af6}
+@media (max-width:700px){.iv-cols{grid-template-columns:1fr}}
+.qz,.reveal{border:1px solid #1e2433;border-radius:8px;margin:8px 0;padding:8px 12px}
+.qz summary,.reveal summary{cursor:pointer;font-weight:600}
+.qz-n{color:#7c5af6;margin-right:8px}
+.qz-a,.drill-a{margin-top:10px}
+.qz-rate{display:flex;gap:6px;align-items:center;font-size:12px;color:#64748b;margin-top:8px}
+.btn-rate,.btn-done{background:#1e2433;color:#e2e8f0;border:1px solid #2d3a52;border-radius:6px;padding:6px 12px;cursor:pointer;font-size:13px;text-decoration:none;display:inline-block}
+.btn-rate.picked,.btn-done.on{background:#7c5af6;border-color:#7c5af6}
+.ls-nav{margin-top:32px;display:flex;flex-direction:column;gap:12px}
+.ls-nav-links{display:flex;justify-content:space-between;gap:12px}
+.nav-link{display:flex;flex-direction:column;text-decoration:none;font-size:13px}
+.nav-link.next{text-align:right}
+.child-list{display:flex;flex-direction:column;gap:6px}
+.child-row{display:flex;gap:10px;align-items:center;padding:8px 10px;border:1px solid #1e2433;border-radius:8px;text-decoration:none}
+.child-txt{display:flex;flex-direction:column;flex:1}
+.child-txt small{color:#64748b}
+.related{display:flex;flex-wrap:wrap;gap:6px}
+.ap-row{margin:6px 0}
+
+/* Curriculum */
+.arc{margin:36px 0;padding-top:20px;border-top:1px solid #1e2433}
+.arc-hdr{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.arc-n{color:#7c5af6;font-size:12px;text-transform:uppercase}
+.arc-theme{color:#64748b;font-size:13px}
+.arc-progress{height:4px;background:#1e2433;border-radius:2px;margin:10px 0 4px}
+.arc-progress div{height:100%;background:#7c5af6;border-radius:2px}
+.arc-count{font-size:12px;color:#64748b;margin-bottom:10px}
+.cur-phase{margin:10px 0}
+.cur-phase-name{font-weight:600;border-left:3px solid var(--c);padding-left:8px;text-decoration:none}
+.cur-lessons{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 0 12px}
+.cur-lesson{font-size:13px;background:#111827;border-radius:6px;padding:3px 8px;text-decoration:none}
+.cur-lesson.done,.cur-phase-name.done{opacity:.55}
+.plan-wk{margin:8px 0}
+
+/* Practice, reference, drill */
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px}
+.card{display:block;background:#111827;border:1px solid #1e2433;border-radius:10px;padding:12px;text-decoration:none;color:#e2e8f0 !important}
+.card-t{font-weight:600}
+.card-d{font-size:13px;color:#94a3b8;margin:6px 0}
+.card-n{font-size:12px;color:#64748b}
+.tabs{display:flex;gap:6px;margin-bottom:16px}
+.tab{padding:6px 12px;border-radius:6px;text-decoration:none;background:#111827}
+.tab.on{background:#7c5af6;color:#fff !important}
+.ref-table{width:100%;border-collapse:collapse;font-size:14px}
+.ref-table td{border-bottom:1px solid #1e2433;padding:6px 8px;vertical-align:top}
+.ref-table .num{white-space:nowrap;color:#fbbf24;font-variant-numeric:tabular-nums}
+.ref-table .note{color:#64748b;font-size:13px}
+.pb-step{display:grid;grid-template-columns:90px 1fr;gap:12px;margin:14px 0}
+.pb-min{color:#7c5af6;font-weight:600}
+.pb-say{font-style:italic;color:#cbd5e1}
+.blk{background:#111827;border-radius:10px;padding:12px 14px;margin:10px 0}
+.drill-src{font-size:12px;color:#64748b;margin-bottom:8px}
+.drill-q{font-size:17px;font-weight:600;margin-bottom:12px}
+.prac-diagram svg{max-width:100%;height:auto}
+
+/* ── Lesson blocks used by js/lesson.js that had no styles ── */
+.lesson code{background:#111827;border:1px solid #1e2433;border-radius:4px;padding:1px 5px;font-size:13px;color:#fbbf24}
+.lesson pre{background:#0d1117;border:1px solid #1e2433;border-radius:8px;padding:12px;overflow:auto;margin:10px 0}
+.lesson pre code{border:none;padding:0;background:none;color:#e2e8f0}
+.lesson table{width:100%;border-collapse:collapse;font-size:14px;margin:10px 0}
+.lesson th,.lesson td{border-bottom:1px solid #1e2433;padding:6px 8px;text-align:left;vertical-align:top}
+.lesson th{color:#94a3b8;font-weight:600}
+.prose-list{margin:0 0 12px 22px}
+.prose-list li{margin:4px 0}
+.ls-time,.ls-pos{color:#64748b}
+.ls-pos::before,.ls-time::before{content:"·";margin-right:8px;color:#334155}
+.ls-primer,.ls-numbers{background:#0f1320;border:1px solid #1e2433;border-radius:10px;padding:12px 16px}
+.ls-numbers{font-variant-numeric:tabular-nums}
+
+.page h1{font-size:28px;font-weight:700;letter-spacing:-.3px;margin:6px 0 10px}
+.page h2{font-size:18px;font-weight:600;margin:24px 0 10px;color:#f1f5f9}
+.page button{font-family:inherit}
+.error{color:#f87171}
+
+/* Scale ladder */
+.ladder{position:relative;margin:12px 0 0 6px;padding-left:22px;border-left:2px solid #1e2433}
+.rung,.trigger{position:relative;margin:0 0 14px}
+.rung-dot{position:absolute;left:-30px;top:14px;width:12px;height:12px;border-radius:50%;border:2px solid #080b14}
+.rung.s .rung-dot{background:#3b82f6}.rung.m .rung-dot{background:#10b981}.rung.l .rung-dot{background:#f59e0b}.rung.h .rung-dot{background:#ef4444}
+.rung-card,.trigger-card{background:#111827;border:1px solid #1e2433;border-radius:10px;padding:12px 14px}
+.rung.s .rung-card{border-color:#1d3a6b}.rung.m .rung-card{border-color:#0f4a2a}.rung.l .rung-card{border-color:#6b4a00}.rung.h .rung-card{border-color:#6b1010}
+.rung-lbl{font-size:11px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase}
+.rung-lbl span{font-weight:500;letter-spacing:.5px;color:#64748b;margin-left:6px;text-transform:none}
+.rung.s .rung-lbl{color:#60a5fa}.rung.m .rung-lbl{color:#34d399}.rung.l .rung-lbl{color:#fbbf24}.rung.h .rung-lbl{color:#f87171}
+.rung-range{color:#fbbf24;font-size:13px;margin:2px 0 6px;font-variant-numeric:tabular-nums}
+.rung-rec{color:#cbd5e1;font-size:14px}
+.rung-rec p:last-child{margin-bottom:0}
+.trigger-line{position:absolute;left:-23px;top:0;bottom:0;border-left:2px dashed #7c5af6}
+.trigger-card{border-color:#3b2f6b;background:#120f22}
+.trigger-badge{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;padding:2px 8px;border-radius:4px;margin-bottom:6px;background:#1a1733;color:#a78bfa}
+.trigger.s-m .trigger-badge{background:#0f2040;color:#60a5fa}
+.trigger.m-l .trigger-badge{background:#1a2a00;color:#a3e635}
+.trigger.l-h .trigger-badge{background:#2a1000;color:#fb923c}
+.trigger-when,.trigger-do{font-size:14px;margin:4px 0}
+.trigger-when{color:#fbbf24}.trigger-do{color:#cbd5e1}
+.trigger-when>span,.trigger-do>span{display:inline-block;min-width:42px;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#7c5af6;margin-right:6px}
+.tools{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
+.tools .tool{font-size:11px}
+
+/* Formulas, checklist, interview, quiz, children */
+.lesson .formula{background:#0a0d20;border:1px solid #2d2a6b;border-radius:8px;padding:10px 12px;margin:8px 0;font-family:inherit;color:#e2e8f0;font-size:14px}
+.formula-n{font-weight:600;margin-bottom:4px}
+.formula code{display:block;padding:6px 8px;margin:4px 0;font-family:'SF Mono',Monaco,monospace;color:#a78bfa}
+.formula-note{font-size:13px;color:#94a3b8}
+.checklist{list-style:none;margin:0!important}
+.checklist li{padding:6px 0;border-bottom:1px solid #1e2433}
+.checklist label{display:flex;gap:10px;align-items:flex-start;cursor:pointer}
+.checklist input{margin-top:5px;accent-color:#7c5af6}
+.iv-prompt{background:#0f1320;border-left:3px solid #7c5af6;padding:8px 14px;margin:0 0 12px}
+.iv-col.senior{border:1px solid #1e2433}
+.iv-probes{margin-top:12px}
+.qz-q{font-weight:600}
+.btn-rate.again.picked{background:#7f1d1d;border-color:#ef4444}
+.btn-rate.good.picked{background:#713f12;border-color:#eab308}
+.btn-rate.easy.picked{background:#14532d;border-color:#22c55e}
+.nav-link b{color:#e2e8f0}.nav-link span{color:#64748b;font-size:12px}
+.child-row{color:#e2e8f0!important}
+.child-row:hover{border-color:#7c5af6}
+.child-n{width:22px;height:22px;border-radius:50%;background:#1e2433;color:#a78bfa;font-size:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.child-icon{font-size:16px}
+.child-done{color:#22c55e;width:16px}
+.prac-card{display:block}
+.card-body{margin-top:6px}
+.df-factors{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+.ap-val{color:#cbd5e1}
+.ex-tagline{font-size:11px;color:#94a3b8;font-style:italic;margin-bottom:4px}
+.ex-overview-text{font-size:11px;color:#64748b;line-height:1.5}
+
+
+/* Compact lesson inside the map's detail panel */
+.lesson.compact{font-size:13px;line-height:1.6;color:#cbd5e1}
+.lesson.compact .ls-head{display:none}
+.lesson.compact .ls{margin:18px 0}
+.lesson.compact .ls h2{font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:#7c5af6;margin-bottom:8px}
+.lesson.compact p{margin:0 0 8px}
+.lesson.compact ul,.lesson.compact ol{margin:0 0 8px 18px}
+.lesson.compact a{color:#a78bfa}
+.lesson.compact .cards{grid-template-columns:1fr}
+.lesson.compact .iv-cols{grid-template-columns:1fr}
+
+/* Learn layout: "where am I" rail + page */
+.learn-wrap{display:flex;align-items:flex-start;min-height:100%}
+.learn-wrap .page{flex:1;min-width:0}
+.rail{position:sticky;top:0;width:260px;flex-shrink:0;height:calc(100dvh - 44px);overflow-y:auto;background:#0d1117;border-right:1px solid #1e2433;padding:14px 10px 40px;font-size:12px}
+.rail::-webkit-scrollbar{width:4px}
+.rail::-webkit-scrollbar-thumb{background:#1e2433;border-radius:2px}
+.rail a{color:#94a3b8;text-decoration:none;cursor:pointer}
+.rail a:hover{color:#e2e8f0}
+.rail-home{display:block;padding:7px 10px;border-radius:6px;margin-bottom:12px;font-weight:600}
+.rail-home.on,.rail-home:hover{background:#151b28;color:#e2e8f0!important}
+.rail-here{background:#0f1220;border:1px solid #2d2a6b;border-radius:8px;padding:10px 12px;margin-bottom:16px}
+.rail-here-lbl{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#7c5af6}
+.rail-here-arc{font-size:11px;color:#64748b;margin-top:4px}
+.rail-here-path{font-weight:600;color:#e2e8f0;margin:2px 0}
+.rail-here-pos{font-size:11px;color:#64748b}
+.rail-sec-lbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.2px;color:#475569;margin:14px 4px 6px}
+.rail-arc>a{display:flex;justify-content:space-between;gap:8px;padding:6px 8px;border-radius:6px}
+.rail-arc>a small{color:#475569;font-variant-numeric:tabular-nums}
+.rail-arc.cur>a{color:#e2e8f0;background:#151b28}
+.rail-phase{margin:2px 0 2px 10px}
+.rail-phase>a{display:block;padding:4px 8px;border-left:2px solid var(--c,#1e2433)}
+.rail-phase.cur>a{color:#e2e8f0}
+.rail-lessons{display:flex;flex-direction:column;margin-left:12px}
+.rail-lessons a{padding:3px 8px;font-size:11px;border-left:1px solid #1e2433}
+.rail a.done{color:#475569}
+.rail a.done::after{content:" ✓";color:#22c55e}
+.rail a.here{color:#fff!important;background:#1a1733;border-radius:4px}
+.rail-sec a{display:block;padding:2px 8px;font-size:12px;cursor:pointer;border-left:2px solid transparent}
+.rail-sec a.on{color:#e2e8f0;border-left-color:#7c5af6}
+@media (max-width:800px){.rail{display:none}}
+
+/* Phase nav entries are <button>s now; reset UA button styles */
+button.pn{width:100%;background:none;border:none;border-left:2px solid transparent;text-align:left;font-family:inherit}
+button.pn.active{border-left-color:#7c5af6;background:#0f1220}
+

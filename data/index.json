@@ -21,5 +21,12 @@
     "phase-19-compliance.json",
     "phase-20-testing.json",
     "phase-21-migrations.json"
-  ]
+  ],
+  "curriculum": "curriculum.json",
+  "reference": [
+    "reference/numbers.json",
+    "reference/playbook.json",
+    "reference/building-blocks.json"
+  ],
+  "practice": "practice/index.json"
 }

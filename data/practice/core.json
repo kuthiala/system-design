@@ -1,0 +1,614 @@
+[
+  {
+    "id": "news-feed",
+    "title": "Social news feed",
+    "difficulty": "core",
+    "time": "45 min",
+    "prompt": "Design the home timeline for a social network: users follow others, post updates, and see a reverse-chronological or ranked feed of posts from people they follow. 300M daily users.",
+    "whyAsked": "It is the canonical read-heavy fan-out problem and tests whether you can reason about asymmetric workloads, cache as architecture, and the celebrity edge case.",
+    "clarify": [
+      {
+        "q": "Chronological or ranked?",
+        "a": "Start chronological; ranking is a layer on top. Feed must be fresh within seconds."
+      },
+      {
+        "q": "Scale and ratios?",
+        "a": "300M DAU, 2M posts per minute at peak, each user opens the feed 10 times a day. Average 300 follows; a few accounts have 50M followers."
+      },
+      {
+        "q": "Media?",
+        "a": "Posts reference media in object storage; the feed service handles text and ids only."
+      },
+      {
+        "q": "Consistency?",
+        "a": "A user must see their own post immediately. Others can see it within a few seconds."
+      }
+    ],
+    "requirements": {
+      "functional": [
+        "Post an update",
+        "Follow and unfollow",
+        "Fetch feed with cursor pagination",
+        "See own posts immediately"
+      ],
+      "nonFunctional": [
+        "Feed read p99 under 200 ms",
+        "Posts visible to followers within 5 seconds",
+        "99.99 percent read availability",
+        "Graceful degradation under load"
+      ]
+    },
+    "estimation": [
+      {
+        "label": "Feed reads",
+        "work": "300M users times 10 opens is 3B reads per day: about 35K RPS average, 150K at peak."
+      },
+      {
+        "label": "Posts",
+        "work": "2M per minute at peak is 33K posts per second."
+      },
+      {
+        "label": "Fan-out writes",
+        "work": "33K posts per second times 300 average followers is 10M timeline inserts per second at peak. That is the number that shapes the design."
+      },
+      {
+        "label": "Timeline cache",
+        "work": "Keep 500 post ids per user for 300M users: 500 times 8 bytes times 300M is 1.2 TB. Fits in a Redis cluster of a few dozen nodes."
+      }
+    ],
+    "api": [
+      "POST /posts {text, mediaIds} returns {postId}",
+      "GET /feed?cursor= returns {posts[], nextCursor}",
+      "POST /follows/{userId}, DELETE /follows/{userId}"
+    ],
+    "dataModel": [
+      "posts: post_id (Snowflake), author_id, text, created_at; sharded by post_id",
+      "follows: follower_id, followee_id; sharded by follower_id, with a reverse index sharded by followee_id",
+      "timelines: Redis list or sorted set per user of post ids, capped at 500"
+    ],
+    "highLevel": "A post write stores the post and publishes an event. Fan-out workers read the author's follower list and push the post id into each follower's cached timeline. Feed reads fetch the id list from the cache, hydrate posts from a post cache or store, and return a page. For accounts with huge follower counts, the post is not fanned out; instead, feed reads merge those accounts' recent posts at read time. The user's own posts are inserted into their timeline synchronously.",
+    "diagram": "graph LR\n  C[Client] --> API[Feed API]\n  API --> PS[(Posts store)]\n  API --> Q[[Post events]]\n  Q --> FO[Fan-out workers]\n  FO --> FL[(Follow graph)]\n  FO --> TL[(Timeline cache)]\n  API --> TL\n  API --> CEL[Celebrity posts cache]\n  API --> PC[(Post cache)]",
+    "deepDives": [
+      {
+        "title": "Fan-out on write versus read",
+        "body": "Write fan-out precomputes every follower's timeline so reads are a cache lookup: ideal for the 99 percent of authors with modest followings. Read fan-out assembles the feed by querying each followee's posts at request time: cheap writes, expensive reads, and 300 queries per feed load is too slow. The hybrid: write fan-out by default; for authors above a follower threshold (say 100K), skip fan-out and merge their recent posts in at read time from a small hot cache. This caps fan-out cost at threshold times posts per second.",
+        "tradeoff": "The threshold is a dial between write cost and read latency. Inactive users waste fan-out work, so skip fan-out for users who have not logged in for weeks and rebuild their timeline on demand."
+      },
+      {
+        "title": "Timeline cache design",
+        "body": "A sorted set per user keyed by post id (time-ordered via Snowflake) capped at 500 entries. Reads take a page of ids and hydrate from a post cache keyed by post id, so each post's content lives once. Cache misses rebuild the timeline from the follow graph and recent posts. Replicate the cache cluster for read availability; losing it is a thundering rebuild, so size the posts store for that.",
+        "tradeoff": "Capping at 500 means deep pagination falls back to a slower path; nearly nobody scrolls that far."
+      },
+      {
+        "title": "Consistency and the user's own post",
+        "body": "Insert the author's post into their own timeline synchronously in the write path so read-your-writes holds without touching replication. Followers see the post after fan-out completes, within seconds, which the product accepts. Unfollow must remove existing posts from the timeline or filter at read time.",
+        "tradeoff": "Filtering at read time is simpler and handles blocks and deletions uniformly; it costs a membership check per post."
+      },
+      {
+        "title": "Ranking layer",
+        "body": "Ranking replaces chronological order with a score from a model over candidates. Keep the candidate generation the same (timeline cache plus celebrity merge), add a ranking service that scores the top few hundred candidates with features from a feature store, and cache the ranked page briefly. Ranking is a read-time compute cost; budget it inside the 200 ms.",
+        "tradeoff": "A ranked feed is harder to make consistent (the same post can move) and requires an ML platform; ship chronological first."
+      }
+    ],
+    "failureModes": [
+      "Fan-out queue backs up during a viral moment: followers see delayed posts; prioritize active users and let inactive timelines lag.",
+      "Timeline cache node loss: affected users get a rebuild from the follow graph; rate-limit rebuilds to protect the posts store.",
+      "A celebrity posts and 50M users refresh: the celebrity cache absorbs it; post hydration cache must be replicated for that key."
+    ],
+    "staffSignals": [
+      "Derives the 10M timeline inserts per second number and lets it drive the hybrid design.",
+      "Handles inactive users and celebrities as explicit cost controls.",
+      "Separates candidate generation from ranking and ships the simple version first.",
+      "Names the thundering rebuild risk when the cache is lost."
+    ],
+    "phases": [
+      "req-rw",
+      "db-cache",
+      "msg",
+      "shard-key",
+      "req-consist",
+      "realtime"
+    ],
+    "quiz": [
+      {
+        "q": "Why does pure fan-out on write fail for accounts with 50M followers?",
+        "a": "One post becomes 50M timeline writes, which takes minutes and floods the cache cluster. Those accounts are handled at read time instead: their recent posts are merged into each feed on request."
+      },
+      {
+        "q": "How does a user see their own post instantly?",
+        "a": "The write path inserts the post into the author's own timeline synchronously, independent of the asynchronous fan-out to followers."
+      },
+      {
+        "q": "What is the cost of capping timelines at 500 ids?",
+        "a": "Deep pagination beyond 500 needs a slower fallback path, which nearly no user triggers; the cap bounds cache memory to about 1.2 TB for 300M users."
+      }
+    ]
+  },
+  {
+    "id": "chat",
+    "title": "Chat system",
+    "difficulty": "core",
+    "time": "45 min",
+    "prompt": "Design a messaging service like WhatsApp or Slack: one-to-one and group chats, message delivery to online and offline users, read receipts, and message history across devices. 50M concurrent users.",
+    "whyAsked": "It combines persistent connections, ordering, durability, fan-out, and presence, and forces you to separate the real-time path from the storage path.",
+    "clarify": [
+      {
+        "q": "Group size limits?",
+        "a": "Groups up to 1,000 members; broadcast channels are out of scope."
+      },
+      {
+        "q": "Delivery guarantees?",
+        "a": "A message, once acknowledged to the sender, is never lost. Each message is delivered to each recipient at least once; clients deduplicate."
+      },
+      {
+        "q": "Ordering?",
+        "a": "Per conversation, all participants see messages in the same order."
+      },
+      {
+        "q": "Scale?",
+        "a": "50M concurrent connections, 1M messages per second at peak, history retained indefinitely, multi-device."
+      }
+    ],
+    "requirements": {
+      "functional": [
+        "Send and receive in 1:1 and group chats",
+        "Offline delivery on reconnect",
+        "Message history and sync across devices",
+        "Read receipts and presence"
+      ],
+      "nonFunctional": [
+        "Delivery latency under 500 ms when online",
+        "No acknowledged message lost",
+        "Consistent per-conversation order",
+        "50M concurrent connections"
+      ]
+    },
+    "estimation": [
+      {
+        "label": "Connection servers",
+        "work": "50M connections at 200K per node (memory-bound) is 250 gateway nodes; 500 with headroom across regions."
+      },
+      {
+        "label": "Message writes",
+        "work": "1M per second at about 1 KB with metadata is 1 GB/s of writes; 86 TB per day before replication. A wide-column store partitioned by conversation and time bucket."
+      },
+      {
+        "label": "Fan-out",
+        "work": "Group messages average 20 recipients: up to 20M deliveries per second at peak across gateways."
+      }
+    ],
+    "api": [
+      "WebSocket: send {conversationId, clientMsgId, body}; receive {msgId, conversationId, seq, body}; ack {msgId}",
+      "GET /conversations/{id}/messages?before=seq for history",
+      "GET /sync?since=cursor for multi-device catch-up"
+    ],
+    "dataModel": [
+      "messages: (conversation_id, bucket) partition key, seq clustering key; msg_id, sender_id, body, created_at",
+      "conversation_members: conversation_id to user ids",
+      "user_inbox cursor: per user per device, last synced seq per conversation",
+      "connection registry: user_id to gateway node ids (in Redis)"
+    ],
+    "highLevel": "Clients hold a WebSocket to a gateway node. A send goes to a chat service that assigns a per-conversation sequence number, persists the message, and acknowledges to the sender. The service looks up each recipient's gateway in the connection registry and routes the message via a backplane; gateways push to connected devices. Offline recipients get the message on reconnect by syncing from their last cursor. Presence is a separate, lossy service.",
+    "diagram": "graph LR\n  A[Client A] --> G1[Gateway 1]\n  B[Client B] --> G2[Gateway 2]\n  G1 --> CS[Chat service]\n  CS --> MS[(Message store)]\n  CS --> REG[(Connection registry)]\n  CS --> BP[[Backplane]]\n  BP --> G2\n  CS --> PN[Push notifications]\n  PRES[Presence service] --> G1",
+    "deepDives": [
+      {
+        "title": "Ordering and ids",
+        "body": "Assign a monotonically increasing sequence per conversation at the chat service that owns that conversation (route by conversation id). This gives all participants the same order without global coordination. Clients send a client-generated id for idempotent retries; the server maps it to the sequence. Lamport-style per-conversation sequencing is enough; wall clocks are display only.",
+        "tradeoff": "Owning a conversation on one service instance makes it a serialization point; a hot group chat is bounded by that instance's throughput, which is fine at 1,000 members."
+      },
+      {
+        "title": "Delivery and durability",
+        "body": "Persist before acknowledging the sender. Deliver to online recipients via the backplane and require a device ack; unacked messages are retried and remain in the store. Offline devices sync by cursor on reconnect: fetch all messages with seq greater than the last synced per conversation. Push notifications wake mobile clients. This makes the real-time path a best-effort accelerator over a durable store, so a gateway crash loses nothing.",
+        "tradeoff": "At-least-once delivery means duplicates on retry; clients deduplicate by message id."
+      },
+      {
+        "title": "Connection tier and backplane",
+        "body": "Gateways are stateful (open sockets) but disposable: a connection registry maps users to gateways, so any service can find a user's sockets. The backplane routes messages to the specific gateways holding recipients rather than broadcasting to all 500. On deploy, gateways drain: stop accepting, tell clients to reconnect with jitter, finish in-flight pushes.",
+        "tradeoff": "Redis pub/sub broadcast is simpler and fails at this node count; a topic-aware broker or registry-based direct routing is required."
+      },
+      {
+        "title": "Multi-device sync and history",
+        "body": "Each device keeps a cursor per conversation. Sync returns messages since the cursor across all conversations in one call. History is read from the message store by conversation and time bucket; recent buckets are cached. Media is stored in object storage and referenced by URL with signed access.",
+        "tradeoff": "Keeping cursors per device multiplies state; it is the only way to make a new device catch up correctly."
+      }
+    ],
+    "failureModes": [
+      "Gateway node dies with 200K connections: clients reconnect with jitter to other nodes, the registry is updated, and messages sent during the gap are delivered on sync.",
+      "Backplane partition between regions: messages persist and are delivered on heal; cross-region delivery latency rises but nothing is lost.",
+      "A group of 1,000 is extremely active: the owning chat instance becomes hot; shard conversations evenly and move hot ones."
+    ],
+    "staffSignals": [
+      "Separates the durable path (store, ack, sync) from the fast path (push) and makes the fast path safe to lose.",
+      "Produces per-conversation ordering without global coordination.",
+      "Designs gateway drain and reconnect behavior rather than assuming sockets are stable.",
+      "Treats presence as a separate, lossy system."
+    ],
+    "phases": [
+      "realtime",
+      "rt-transport",
+      "rt-pubsub",
+      "shard-key",
+      "msg",
+      "req-consist"
+    ],
+    "quiz": [
+      {
+        "q": "How do all participants see messages in the same order without a global clock?",
+        "a": "A single owner per conversation assigns an increasing sequence number to each message; routing by conversation id makes that owner the serialization point."
+      },
+      {
+        "q": "Why persist before pushing?",
+        "a": "So a gateway or backplane failure never loses an acknowledged message; the push path is an accelerator, and sync from the store is the guarantee."
+      },
+      {
+        "q": "What does the connection registry do?",
+        "a": "It maps each user (and device) to the gateway nodes holding their sockets, so the chat service can route a message to exactly the right gateways instead of broadcasting to all of them."
+      }
+    ]
+  },
+  {
+    "id": "notifications",
+    "title": "Notification service",
+    "difficulty": "core",
+    "time": "40 min",
+    "prompt": "Design a platform that sends push, email, SMS, and in-app notifications on behalf of many internal products, with user preferences, rate limits, templating, delivery tracking, and retries. 100M notifications per day.",
+    "whyAsked": "It is a messaging and reliability problem with external dependencies, idempotency, and fairness between internal tenants, and it exposes whether you design for the delivery providers being slow or down.",
+    "clarify": [
+      {
+        "q": "Who are the callers?",
+        "a": "Dozens of internal services. Some notifications are transactional (password reset, must deliver within seconds), some are marketing (can be delayed or dropped)."
+      },
+      {
+        "q": "Channels and providers?",
+        "a": "APNs and FCM for push, two email providers, one SMS provider; provider failover is desired."
+      },
+      {
+        "q": "Preferences and compliance?",
+        "a": "Per-user channel opt-outs, quiet hours, and per-category frequency caps; unsubscribe must be honored immediately."
+      },
+      {
+        "q": "Delivery guarantee?",
+        "a": "At-least-once to the provider for transactional; best-effort with caps for marketing. No duplicates visible to users."
+      }
+    ],
+    "requirements": {
+      "functional": [
+        "Send notification by user and category across channels",
+        "Preferences, quiet hours, frequency caps",
+        "Templates with localization",
+        "Delivery status tracking and retries",
+        "Provider failover"
+      ],
+      "nonFunctional": [
+        "Transactional delivery to provider within 5 seconds at p99",
+        "No duplicate user-visible notifications",
+        "Isolation between calling services",
+        "Marketing campaigns of 50M cannot delay transactional sends"
+      ]
+    },
+    "estimation": [
+      {
+        "label": "Average and peak",
+        "work": "100M per day is about 1,200 per second average; marketing campaigns create bursts of 50M in an hour, which is 14K per second."
+      },
+      {
+        "label": "Provider limits",
+        "work": "SMS providers allow hundreds per second per account; email providers thousands; push effectively unlimited. Rate limiting per provider is mandatory."
+      },
+      {
+        "label": "State",
+        "work": "One row per notification for status: 100M per day at 500 bytes is 50 GB per day; retain 90 days hot, archive beyond."
+      }
+    ],
+    "api": [
+      "POST /notifications {userId, category, channelHints, templateId, data, idempotencyKey, priority} returns {notificationId}",
+      "GET /notifications/{id} returns status per channel",
+      "PUT /users/{id}/preferences"
+    ],
+    "dataModel": [
+      "notifications: id, user_id, category, priority, status, created_at; idempotency_key unique per caller",
+      "deliveries: notification_id, channel, provider, attempts, last_error, delivered_at",
+      "preferences: user_id, channel opt-outs, quiet hours, category caps",
+      "templates: id, locale, channel, body"
+    ],
+    "highLevel": "Callers submit a notification with an idempotency key. The API validates, persists, and enqueues to a priority-separated queue (transactional versus bulk). Workers resolve preferences and caps, render templates, select a channel and provider, and call the provider through a per-provider rate limiter and circuit breaker. Provider callbacks update delivery status. Failures retry with backoff and fall over to a secondary provider; exhausted attempts land in a dead-letter queue with alerts.",
+    "diagram": "graph LR\n  S[Calling services] --> API[Notification API]\n  API --> DB[(Notification store)]\n  API --> QT[[Transactional queue]]\n  API --> QB[[Bulk queue]]\n  QT --> W[Workers]\n  QB --> W\n  W --> PREF[(Preferences)]\n  W --> RL[Per-provider rate limiter + breaker]\n  RL --> P1[APNs / FCM]\n  RL --> P2[Email providers]\n  RL --> P3[SMS provider]\n  P2 -. callbacks .-> API\n  W --> DLQ[[Dead letter]]",
+    "deepDives": [
+      {
+        "title": "Priority isolation",
+        "body": "A marketing blast must never delay a password reset. Separate queues and worker pools by priority, with transactional workers reserved and bulk workers rate-limited. Apply per-calling-service quotas so one product's bug cannot starve another. Use weighted fair scheduling within the bulk tier.",
+        "tradeoff": "Reserved transactional capacity sits idle most of the time; the cost is small compared with a delayed security notification."
+      },
+      {
+        "title": "Idempotency and deduplication",
+        "body": "Callers retry on timeouts, so the API deduplicates by (caller, idempotency key). Workers may process a message twice after a crash, so delivery records are written before the provider call with a unique (notification, channel) constraint, and the provider call checks that record. Provider callbacks are idempotent updates.",
+        "tradeoff": "A provider call that succeeded but whose response was lost can still produce a duplicate; use provider-side idempotency keys where offered and accept rare duplicates otherwise."
+      },
+      {
+        "title": "Provider resilience",
+        "body": "Each provider gets a token-bucket rate limiter matching its contract, a circuit breaker, and a timeout. On breaker open, fail over to the secondary provider for that channel. Retries use exponential backoff with jitter and a cap; transactional messages escalate to another channel (SMS if push fails) by policy. Dead letters are monitored, not forgotten.",
+        "tradeoff": "Automatic channel escalation can annoy users and cost money (SMS); restrict it to categories that justify it."
+      },
+      {
+        "title": "Preferences, caps, and compliance",
+        "body": "Resolve preferences at send time, not enqueue time, so an unsubscribe during a campaign is honored. Cache preferences with short TTL and invalidate on change. Frequency caps are per user per category counters in Redis with sliding windows. Quiet hours delay rather than drop, using a scheduled queue.",
+        "tradeoff": "Resolving at send time costs a lookup per message; caching makes it cheap and the correctness is required by law for marketing."
+      }
+    ],
+    "failureModes": [
+      "Email provider degrades to 10 percent success: breaker opens, failover engages, backlog drains at the secondary's rate limit; alert on backlog age.",
+      "A calling service enqueues 50M transactional messages by mistake: per-caller quotas and an anomaly alert catch it; a kill switch pauses that caller.",
+      "Worker crash mid-batch: at-least-once redelivery with delivery-record dedup prevents duplicates."
+    ],
+    "staffSignals": [
+      "Leads with priority isolation and per-caller fairness because the platform has many internal tenants.",
+      "Designs idempotency at two layers (API and worker) and is honest about the residual duplicate case.",
+      "Treats providers as unreliable dependencies with limits, breakers, and failover.",
+      "Resolves preferences at send time for compliance and explains the cost."
+    ],
+    "phases": [
+      "msg",
+      "msg-pattern",
+      "rel-cb",
+      "api-rate",
+      "tenant-noise",
+      "compliance"
+    ],
+    "quiz": [
+      {
+        "q": "Why separate transactional and bulk queues?",
+        "a": "So a 50M marketing campaign cannot delay a password reset; reserved workers and separate queues isolate latency-critical messages from volume."
+      },
+      {
+        "q": "When should user preferences be evaluated?",
+        "a": "At send time, so an unsubscribe or quiet-hours change that happens after enqueue is still honored; cache with short TTL to keep it cheap."
+      },
+      {
+        "q": "What happens when a provider's circuit breaker opens?",
+        "a": "Workers stop calling it, fail over to a secondary provider for that channel, and retry with backoff; messages that exhaust attempts go to a monitored dead-letter queue."
+      }
+    ]
+  },
+  {
+    "id": "autocomplete",
+    "title": "Search autocomplete",
+    "difficulty": "core",
+    "time": "35 min",
+    "prompt": "Design type-ahead suggestions for a search box: as the user types, return the top 10 most popular completions for the prefix within 100 ms, updated from query logs. 10B searches per day.",
+    "whyAsked": "It is a data structure question (tries, top-k) wrapped in a latency and freshness problem, and it tests whether you separate the offline aggregation pipeline from the online serving path.",
+    "clarify": [
+      {
+        "q": "Latency and result count?",
+        "a": "Under 100 ms end to end at p99; 10 suggestions; prefix-only matching, not fuzzy."
+      },
+      {
+        "q": "Freshness?",
+        "a": "Popularity updated hourly is fine; trending terms within minutes is a stretch goal."
+      },
+      {
+        "q": "Personalization and language?",
+        "a": "No personalization in v1; multiple languages; filter offensive terms."
+      },
+      {
+        "q": "Scale?",
+        "a": "10B searches per day, so about 100K queries per second, and every keystroke is a request, so 500K RPS to autocomplete at peak."
+      }
+    ],
+    "requirements": {
+      "functional": [
+        "Top 10 completions for a prefix",
+        "Ranking by popularity",
+        "Hourly refresh from logs",
+        "Blocklist filtering"
+      ],
+      "nonFunctional": [
+        "p99 under 100 ms including network",
+        "500K RPS at peak",
+        "Read path survives offline pipeline failures",
+        "Memory-efficient data structure"
+      ]
+    },
+    "estimation": [
+      {
+        "label": "Keystroke RPS",
+        "work": "100K searches per second with an average of 5 keystrokes each is 500K autocomplete requests per second at peak; most must be served from memory at the edge."
+      },
+      {
+        "label": "Trie size",
+        "work": "100M distinct queries, average 20 characters: a naive trie is tens of GB; a compressed trie with precomputed top-k per node is a few GB and fits in memory on each serving node."
+      },
+      {
+        "label": "Log volume",
+        "work": "10B queries per day at 50 bytes is 500 GB per day into the aggregation pipeline, a batch job of minutes on a cluster."
+      }
+    ],
+    "api": [
+      "GET /suggest?q=prefix&lang=en returns {suggestions: [{text, score}]}"
+    ],
+    "dataModel": [
+      "Serving: a trie (or sorted prefix table) where each node stores its precomputed top-10 completions",
+      "Offline: aggregated query counts per term per hour; a weekly-decayed popularity score"
+    ],
+    "highLevel": "An offline pipeline aggregates query logs hourly into term frequencies with time decay, filters the blocklist, builds a compressed trie with top-k precomputed at every node, and publishes it as a versioned snapshot. Serving nodes load the snapshot into memory and answer prefix lookups in microseconds. A CDN or edge cache serves the most common prefixes directly. The browser debounces keystrokes and caches results per prefix.",
+    "diagram": "graph LR\n  B[Browser] --> CDN[Edge cache]\n  CDN --> SVC[Suggest service: in-memory trie]\n  LOGS[(Query logs)] --> AGG[Hourly aggregation]\n  AGG --> BLD[Trie builder]\n  BLD --> SNAP[(Snapshot store)]\n  SNAP --> SVC",
+    "deepDives": [
+      {
+        "title": "Data structure",
+        "body": "A trie answers prefix lookups in O(prefix length), but finding the top 10 under a node by traversal is too slow. Precompute the top-k list at every node during the build, so a lookup is a walk plus a read. For memory, compress chains (radix tree) and store top-k as ids into a term table. Alternatives: a sorted array of all terms with binary search for the prefix range plus a per-prefix top-k table, which is simpler and often fast enough.",
+        "tradeoff": "Precomputed top-k makes updates a full rebuild rather than incremental, which is fine at hourly freshness."
+      },
+      {
+        "title": "Serving at 500K RPS",
+        "body": "Serving is read-only and in-memory, so scale is horizontal: load the same snapshot on N nodes behind a load balancer; each node does tens of thousands of lookups per second. Edge caching of responses for short prefixes (a few hundred thousand of them account for most traffic) offloads the majority. Clients debounce keystrokes and cache prefixes they have already asked for.",
+        "tradeoff": "Edge caching freezes results for the TTL; keep it short (a minute) and accept slight staleness."
+      },
+      {
+        "title": "Offline pipeline and snapshot rollout",
+        "body": "Hourly batch job: aggregate counts, apply exponential decay so old popularity fades, remove blocklisted and low-count terms, build the trie, validate (size, sample queries), and publish a versioned snapshot. Serving nodes hot-swap to the new snapshot and keep the old one for rollback. If the pipeline fails, serving continues on the last good snapshot.",
+        "tradeoff": "Snapshot swaps double memory briefly on each node; size nodes for two snapshots."
+      },
+      {
+        "title": "Trending and sharding",
+        "body": "For trending within minutes, run a streaming aggregator over the query stream that maintains counts in a sliding window and merges a small trending overlay into the top-k at query time. If the trie exceeds one node's memory, shard by first character range with a router; keep hot shards replicated more.",
+        "tradeoff": "Sharding by first character skews (some letters are far more common); use a learned partition over prefix ranges instead."
+      }
+    ],
+    "failureModes": [
+      "Offline job produces a corrupt or tiny snapshot: validation gate rejects it and serving keeps the previous version.",
+      "A trending offensive term appears: blocklist is applied at build time and as a runtime filter overlay for emergencies.",
+      "Node memory pressure during snapshot swap: stagger rollouts and keep headroom for two snapshots."
+    ],
+    "staffSignals": [
+      "Recognizes that per-keystroke traffic is 5x searches and designs serving around memory and the edge.",
+      "Separates the offline build from the online path so pipeline failures cannot hurt serving.",
+      "Precomputes top-k rather than computing it per query and explains the update cost.",
+      "Plans snapshot validation and rollback as part of the design."
+    ],
+    "phases": [
+      "db-search",
+      "db-cache",
+      "network",
+      "analytics",
+      "compute"
+    ],
+    "quiz": [
+      {
+        "q": "Why precompute top-k at each trie node?",
+        "a": "Traversing a subtree to find the most popular completions per query is far too slow at 500K RPS; storing the top-k at build time makes a lookup a prefix walk plus a read."
+      },
+      {
+        "q": "What protects serving from a broken offline pipeline?",
+        "a": "Versioned snapshots with a validation gate; serving nodes keep the last good snapshot and only swap after the new one passes checks."
+      },
+      {
+        "q": "Why is traffic 5x the search rate?",
+        "a": "Every keystroke is a request; an average query of five characters generates five autocomplete calls, mitigated by client debouncing and prefix caching."
+      }
+    ]
+  },
+  {
+    "id": "video-platform",
+    "title": "Video upload and streaming",
+    "difficulty": "core",
+    "time": "45 min",
+    "prompt": "Design a platform like YouTube: creators upload videos, the system transcodes them into multiple resolutions, and viewers stream them globally with adaptive bitrate. 500 hours uploaded per minute, 1B views per day.",
+    "whyAsked": "It is a storage, pipeline, and CDN problem at a scale where bandwidth cost dominates, and it tests whether you keep bytes off your servers and design the processing pipeline for failure.",
+    "clarify": [
+      {
+        "q": "Upload sizes and formats?",
+        "a": "Up to several GB per upload in any common format; resumable uploads required."
+      },
+      {
+        "q": "Playback requirements?",
+        "a": "Adaptive bitrate (HLS or DASH), start within 2 seconds, global audience, 80 percent mobile."
+      },
+      {
+        "q": "Processing latency?",
+        "a": "A video should be playable at low resolution within minutes of upload and in all resolutions within an hour."
+      },
+      {
+        "q": "Scope?",
+        "a": "Upload, transcode, store, stream, basic metadata and view counts. No recommendations, comments, or live streaming."
+      }
+    ],
+    "requirements": {
+      "functional": [
+        "Resumable upload",
+        "Transcode to a ladder of resolutions and codecs",
+        "Adaptive streaming via CDN",
+        "Metadata, thumbnails, view counts"
+      ],
+      "nonFunctional": [
+        "Playback start under 2 seconds globally",
+        "Durable storage of originals",
+        "Transcoding pipeline tolerant of failure and spikes",
+        "Cost dominated by egress; minimize it"
+      ]
+    },
+    "estimation": [
+      {
+        "label": "Upload volume",
+        "work": "500 hours per minute at 2 GB per hour of source is 1 TB per minute, about 1.4 PB per day of originals; transcoded outputs add roughly the same again."
+      },
+      {
+        "label": "Storage growth",
+        "work": "About 3 PB per day total, 1 EB per year. Tiering is mandatory: most videos get few views after the first week."
+      },
+      {
+        "label": "Streaming bandwidth",
+        "work": "1B views per day, average 5 minutes at 3 Mbps average bitrate: 5 minutes times 3 Mbps is about 110 MB per view, so 110 PB per day. Egress at list price would be millions of dollars per day; CDN contracts and peering are the economics."
+      },
+      {
+        "label": "Transcoding compute",
+        "work": "500 hours per minute of input, each transcoded into 6 renditions at roughly real time per rendition on a core: about 3,000 core-hours per minute, or 180K cores busy. Chunked, parallel, and spot-friendly."
+      }
+    ],
+    "api": [
+      "POST /uploads returns {uploadId, presignedPartUrls[]}; POST /uploads/{id}/complete",
+      "GET /videos/{id} returns metadata and manifest URL",
+      "GET manifest.m3u8 and segment files served by CDN"
+    ],
+    "dataModel": [
+      "videos: id, owner_id, title, status (uploading, processing, ready), duration, created_at",
+      "renditions: video_id, resolution, codec, manifest path, segment prefix",
+      "Original and rendition segments in object storage, keyed by video id and rendition; content-hashed paths for immutability"
+    ],
+    "highLevel": "Clients upload directly to object storage with presigned multipart URLs and resume by part. Completion publishes an event. A workflow orchestrator splits the video into chunks, fans out transcoding tasks to a worker fleet (spot instances), assembles renditions and manifests, generates thumbnails, and marks the video ready. Playback fetches a manifest and segments from a CDN that fronts object storage; the player switches renditions adaptively. View counts are aggregated from CDN logs and player beacons asynchronously.",
+    "diagram": "graph LR\n  U[Uploader] -- presigned multipart --> OS[(Object storage: originals)]\n  OS --> EV[[Upload complete event]]\n  EV --> WF[Workflow orchestrator]\n  WF --> TC[Transcode workers on spot]\n  TC --> RS[(Object storage: renditions + manifests)]\n  RS --> CDN[CDN]\n  CDN --> V[Viewer]\n  API[Metadata API] --> DB[(Metadata store)]\n  V --> API\n  CDN -. logs .-> AN[View analytics]",
+    "deepDives": [
+      {
+        "title": "Upload path",
+        "body": "Never proxy bytes through API servers. Issue presigned multipart upload URLs; the client uploads parts in parallel and can resume by re-requesting URLs for missing parts. Enforce size and type limits in the presigned policy. Completion triggers an event with the object key; the API never touches the file. Virus and content checks run as early pipeline steps on the stored object.",
+        "tradeoff": "Direct-to-storage uploads make server-side validation asynchronous; a bad file is rejected after upload rather than during."
+      },
+      {
+        "title": "Transcoding pipeline",
+        "body": "Split the source into segments (by keyframe, a few seconds each) so transcoding parallelizes across hundreds of workers and a failed task retries one segment, not the whole video. Produce a low rendition first so the video is playable within minutes, then the full ladder. Run workers on spot capacity with checkpointed, idempotent tasks keyed by (video, rendition, segment). A workflow engine tracks state and retries; a DAG per video.",
+        "tradeoff": "Segment-level parallelism complicates audio alignment and two-pass encoding; most platforms accept slightly lower compression efficiency for the speed."
+      },
+      {
+        "title": "Delivery and adaptive bitrate",
+        "body": "Store renditions as short segments plus a manifest. The CDN caches segments at the edge; popular videos are nearly always edge hits. The player measures throughput and switches rendition per segment. Cache keys are immutable content-hashed paths so there is no invalidation. Multi-CDN with steering by region and cost is standard at this scale, plus peering with ISPs.",
+        "tradeoff": "Shorter segments switch faster and start faster but add manifest and request overhead; 2 to 6 seconds is the usual range."
+      },
+      {
+        "title": "Storage tiering and cost",
+        "body": "Views follow a steep power law: most videos are cold after days. Keep originals in archive tier after processing, keep hot renditions in standard tier, move cold renditions to infrequent-access tier by age and view rate, and consider dropping the highest renditions for videos nobody watches. Egress dwarfs storage; the CDN hit rate is the cost lever that matters most.",
+        "tradeoff": "Restoring an archived original for re-transcoding takes hours; keep at least one mid rendition always available."
+      }
+    ],
+    "failureModes": [
+      "Transcode worker fleet loses spot capacity: tasks requeue, the pipeline slows, the low-resolution-first rule keeps videos playable.",
+      "A video goes viral in a region before edge caches warm: origin shield absorbs the burst; pre-warm popular renditions when view velocity spikes.",
+      "Object storage regional outage: originals are cross-region replicated; CDN serves cached renditions; uploads degrade to a secondary region."
+    ],
+    "staffSignals": [
+      "Computes the bandwidth number and recognizes that egress economics, not compute, decide the architecture.",
+      "Keeps bytes off application servers in both directions.",
+      "Designs the pipeline for partial failure with segment-level idempotent tasks on spot.",
+      "Uses immutable content-hashed paths to avoid cache invalidation entirely."
+    ],
+    "phases": [
+      "storage",
+      "network",
+      "msg",
+      "compute-model",
+      "cost",
+      "req-traffic"
+    ],
+    "quiz": [
+      {
+        "q": "Why split videos into segments before transcoding?",
+        "a": "Parallelism across many workers so a multi-hour video processes in minutes, and failure isolation so a crashed task retries one segment rather than restarting the whole job."
+      },
+      {
+        "q": "Why are content-hashed paths used for segments?",
+        "a": "They make every object immutable, so CDN caches never need invalidation and a re-encode is simply a new path referenced by a new manifest."
+      },
+      {
+        "q": "Which cost dominates a video platform and what is the lever?",
+        "a": "Egress bandwidth. The lever is CDN hit rate and multi-CDN peering contracts, not compute or storage."
+      }
+    ]
+  }
+]

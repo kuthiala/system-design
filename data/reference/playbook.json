@@ -1,0 +1,180 @@
+{
+  "id": "playbook",
+  "title": "The 45-minute interview",
+  "intro": "A system design interview is a structured conversation that you are expected to drive. The interviewer is not grading the diagram; they are grading how you think, what you prioritize, and whether they would trust you to lead this design with a real team. This playbook is the structure. Practice it until the structure is invisible and only the thinking shows.",
+  "timeline": [
+    {
+      "minutes": "0 to 5",
+      "phase": "Clarify and scope",
+      "goal": "Turn a two-sentence prompt into a bounded problem with agreed functional and non-functional requirements.",
+      "do": [
+        "Restate the problem in one sentence and confirm it.",
+        "Ask who the users are and what the three most important actions are.",
+        "Propose what is in scope and explicitly what is out, and get a nod.",
+        "Ask the questions whose answers change the design: scale, read/write, latency, consistency, geography.",
+        "Write the requirements where both of you can see them."
+      ],
+      "avoid": [
+        "Asking twenty questions without proposing answers; staff candidates propose and confirm.",
+        "Accepting 'as scalable as possible' as a requirement."
+      ],
+      "say": "'Let me make sure I am solving the right problem. I am going to assume X, Y, and Z are in scope and leave W out; does that match what you had in mind?'"
+    },
+    {
+      "minutes": "5 to 10",
+      "phase": "Estimate",
+      "goal": "Produce the four or five numbers that shape the architecture and interpret them out loud.",
+      "do": [
+        "Derive RPS from users and actions; state average and peak.",
+        "Derive storage from write rate and record size; state one year and five years.",
+        "State the read/write ratio and the hottest access pattern.",
+        "Translate each number into a consequence: 'that fits one primary', 'that needs a cache', 'that forces sharding'."
+      ],
+      "avoid": [
+        "Precision. Round to one significant figure and move on.",
+        "Estimating things that do not change the design."
+      ],
+      "say": "'Roughly 5K writes a second at peak, which a single Postgres handles, but at this growth rate we cross the line in about two years, so I will design the data layer so that transition is possible.'"
+    },
+    {
+      "minutes": "10 to 20",
+      "phase": "High-level design",
+      "goal": "Draw the simplest system that satisfies the requirements end to end, with the data flow for the top two or three operations.",
+      "do": [
+        "Start with clients, an API layer, the services that matter, the primary store, and the async path.",
+        "Walk one read and one write through the diagram, naming every hop.",
+        "Define the core API and the core data model briefly.",
+        "Call out the one or two components you expect to be the hard part and say you will return to them."
+      ],
+      "avoid": [
+        "Drawing every box you know. Each box must earn its place with a requirement.",
+        "Going deep before the whole picture exists."
+      ],
+      "say": "'This is deliberately simple. The interesting problems are the fan-out on write and the consistency of the counter; I want to spend most of our time there.'"
+    },
+    {
+      "minutes": "20 to 35",
+      "phase": "Deep dives",
+      "goal": "Demonstrate depth on the two or three components that carry the most risk, with explicit tradeoffs and numbers.",
+      "do": [
+        "Pick the deep dive that matters most, or let the interviewer steer, and go one level down: data model, algorithm, failure handling.",
+        "For every choice, name the alternative and the condition under which you would switch.",
+        "Address scale explicitly: what breaks at 10x, and what you would change.",
+        "Address failure explicitly: what happens when this component is slow, down, or partitioned."
+      ],
+      "avoid": [
+        "Listing technologies without the reasoning that picks one.",
+        "Hand-waving consistency. Say exactly what a reader can see after a write."
+      ],
+      "say": "'There are two ways to do this. Option A is simpler and fine until about 50K subscribers per topic. Past that, B. Given our numbers, I would ship A with the interface shaped so B is a swap, not a rewrite.'"
+    },
+    {
+      "minutes": "35 to 42",
+      "phase": "Operate and evolve",
+      "goal": "Show you have run systems: observability, deploys, security, cost, and the migration path when requirements change.",
+      "do": [
+        "Name the three alerts that would page a human and the SLO behind each.",
+        "Say how a change ships safely: flags, canary, rollback.",
+        "Name the dominant cost line and one lever to cut it.",
+        "Describe the next architectural transition and what triggers it."
+      ],
+      "avoid": [
+        "Treating this as optional. It is where staff candidates separate from senior ones."
+      ],
+      "say": "'In production, the first thing I expect to bite us is replication lag making the user's own write disappear, so I would ship read-your-writes pinning on day one and alert on lag over two seconds.'"
+    },
+    {
+      "minutes": "42 to 45",
+      "phase": "Summarize and open questions",
+      "goal": "Leave the interviewer with a crisp picture and the sense that you know what you do not know.",
+      "do": [
+        "Summarize the design in three sentences: the shape, the hard part, the key tradeoff.",
+        "Name one thing you would want to validate with real data before committing.",
+        "Ask the interviewer what they would push on, if time remains."
+      ],
+      "avoid": [
+        "Introducing a new component in the last two minutes."
+      ],
+      "say": "'To summarize: write-time fan-out with a read-time merge for high-follower accounts, Postgres sharded by user with Redis timelines, Kafka for the async path. The riskiest assumption is the 100:1 read ratio; I would instrument that in week one.'"
+    }
+  ],
+  "signals": {
+    "senior": [
+      "Produces a working design that meets the stated requirements.",
+      "Knows the standard components and uses them correctly.",
+      "Can explain tradeoffs when asked.",
+      "Handles the deep dive the interviewer picks."
+    ],
+    "staff": [
+      "Drives the conversation: proposes scope, quantifies unprompted, chooses the deep dives.",
+      "Reasons from numbers and constraints to decisions, and names the number that would flip each decision.",
+      "Keeps the design as simple as the requirements allow and resists adding components without a reason.",
+      "Designs the evolution: what breaks at 10x, which transition comes first, how it is migrated without downtime.",
+      "Treats failure, operations, security, and cost as part of the design, not an appendix.",
+      "Considers the organization: team boundaries, ownership, on-call load, what a platform must provide.",
+      "Says 'I would not build that' when it is true, and explains what to do instead.",
+      "Is honest about uncertainty and says what they would measure to resolve it."
+    ]
+  },
+  "phrases": [
+    "'The number that decides this is X. Let me estimate it.'",
+    "'I am going to keep this simple on purpose and spend our time where the risk is.'",
+    "'This works until roughly N. Past that, we would change Y, and here is how the migration goes.'",
+    "'If this component is slow rather than down, here is what the caller does.'",
+    "'That is a product decision with a cost; here are the two options and what each buys.'",
+    "'I have seen this fail in production because of Z, so I would add W from day one.'",
+    "'The alternative is A. I would switch to it if B became true.'",
+    "'What I would want to validate first is...'"
+  ],
+  "redFlags": [
+    "Starting to draw before any requirement is agreed.",
+    "Microservices, Kafka, or Cassandra proposed without a number that requires them.",
+    "A single global latency or availability target for all operations.",
+    "No answer for 'what if this box fails' on any box.",
+    "A cache with no invalidation story, or a queue with no idempotency story.",
+    "Sharding without naming the key and the query it makes expensive.",
+    "Multi-region compute with single-region data.",
+    "Never mentioning how a change gets deployed or how you would know it broke.",
+    "Running out of time with no deep dive done."
+  ],
+  "questionBank": [
+    {
+      "category": "Clarifying questions worth asking",
+      "items": [
+        "Who are the users and what are the top three things they do?",
+        "How many daily active users, and what is the growth trajectory?",
+        "What is the read-to-write ratio for the main operations?",
+        "What latency does the main interactive operation need, at p99?",
+        "Which operations need strong consistency, and which can be stale for a few seconds?",
+        "Where are the users, and are there data residency constraints?",
+        "What is the budget or cost sensitivity, and what is the team size?",
+        "Is this greenfield, or are we evolving an existing system?"
+      ]
+    },
+    {
+      "category": "Follow-ups interviewers love",
+      "items": [
+        "What happens when this component is slow, not down?",
+        "What is the blast radius of a bad deploy here?",
+        "How does a user see their own write immediately?",
+        "What is the hottest key, and what happens to it?",
+        "How would you migrate off this choice if it turns out wrong?",
+        "What would you cut if the budget halved?",
+        "Which three alerts page a human?",
+        "What did you leave out, and why?"
+      ]
+    },
+    {
+      "category": "Staff-level prompts to rehearse",
+      "items": [
+        "Our monolith hurts and we have 80 engineers. What do we do this year?",
+        "One tenant is 30 percent of our load. Fix it without losing them.",
+        "Add an LLM feature to this product; cost and safety matter.",
+        "We need to be in the EU by Q3 with residency guarantees.",
+        "Move the orders table to a new store with zero downtime.",
+        "Our p99 doubled after the last three releases. Where do you start?",
+        "Design the on-call and reliability program for this system."
+      ]
+    }
+  ]
+}

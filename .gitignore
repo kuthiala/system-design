@@ -1,1 +1,4 @@
-examples/*.js
+# Local, uncommitted example overlays (upload them via the UI instead)
+examples/local/
+examples/*.local.js
+.DS_Store

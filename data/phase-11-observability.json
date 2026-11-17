@@ -11,6 +11,9 @@
     "hyper"
   ],
   "short": "The ability to ask any question about your running system and get the answer in minutes — built on logs, metrics, traces, and the discipline to alert only on what matters",
+  "tldr": "Observability is the ability to ask any question about the running system without deploying new code. Logs tell you what happened, metrics tell you how it is trending, traces tell you why this request was slow. Alert on symptoms users feel (SLOs), not on causes machines report (CPU).",
+  "keyInsight": "You cannot debug what you cannot see, and at scale you cannot see what you did not instrument in advance. Observability is a design input, not an ops afterthought: trace ids, structured logs, and SLO metrics must exist before the first incident, because the incident is when you need them and too late to add them.",
+  "mentalModel": "A hospital patient monitor. Metrics are the vital signs on the screen: cheap, continuous, trend-able, and what the alarms watch. Logs are the chart notes: detailed, per-event, what you read after the alarm. Traces are the contrast dye in the scan: follow one request through every organ to see where it stalled. Alarms set on vital-sign thresholds that fire during every workout teach the nurses to ignore them.",
   "detail": {
     "what": "Observability is the ability to understand what's happening inside your system by examining its external outputs — without deploying new code, attaching a debugger, or SSHing into a machine. It rests on three complementary pillars, each answering a different type of question: (1) Logs — timestamped, structured records of discrete events: 'at 14:32:07.123 UTC, user 42 from IP 203.0.113.5 called POST /api/orders, which returned 201 in 47ms after writing to shard-3.' Logs answer: 'What exactly happened?' They provide the narrative — the forensic evidence for debugging a specific incident or auditing a specific action. (2) Metrics — numerical measurements aggregated over time: 'p99 latency is 220ms, error rate is 0.3%, CPU is at 73%, queue depth is 450, active connections: 1,204.' Metrics answer: 'How is the system performing right now, and how is that trending?' They're cheap to store (pre-aggregated), fast to query, and the foundation of dashboards and alerting. (3) Traces — the complete path of a single request as it traverses multiple services: 'Request abc123 entered the API gateway at t=0, hit auth-service at t=2ms (took 5ms), then order-service at t=8ms (took 30ms, including a 22ms Postgres query and a 3ms Redis lookup), then payment-service at t=40ms (took 150ms including an external Stripe API call).' Traces answer: 'Why is this specific request slow?' They stitch together the per-service view into an end-to-end story. Beyond these three pillars, mature observability includes: profiling (continuous CPU/memory profiling to find hot code paths), SLO tracking (measuring your Service Level Objectives in real-time and managing error budgets), and alerting (the discipline of notifying humans only when action is required). Together, these capabilities let you go from 'something is wrong' to 'this is the root cause and here's the fix' in minutes instead of hours.",
     "why": "You cannot fix what you cannot see. Without observability, an outage is detective work: SSH into machines, grep through gigabytes of unstructured logs, form hypotheses, check another machine, realize the problem was in a different service entirely, start over. Engineers spend 4–5 hours per incident on average in poorly observed systems. With proper observability, the same incident plays out differently: PagerDuty fires because the error budget burn rate exceeded 10× normal. The on-call engineer opens a dashboard, sees that the /checkout endpoint's p99 latency spiked from 200ms to 8s starting at 14:22. They click into the trace view, pick a slow request, and see that 7.5s of the 8s was spent in a single Postgres query in the inventory-service. They check the slow query log and find a sequential scan on the orders table — a new feature deployed at 14:20 added a query missing an index. Fix: add the index, latency returns to normal at 14:35. Total incident duration: 13 minutes. The difference between a 13-minute incident and a 5-hour incident is almost entirely observability quality. Beyond incidents, observability pays dividends in: (a) capacity planning — you can see when you're approaching resource ceilings weeks in advance and scale proactively instead of reactively; (b) feature velocity — catching performance regressions in staging or canary before they reach all users; (c) cost optimization — identifying over-provisioned services or inefficient queries that waste money; (d) SLO confidence — knowing your actual reliability numbers so you can make informed decisions about shipping velocity vs. stability.",
@@ -153,5 +156,33 @@
       ]
     }
   },
+  "interview": {
+    "prompt": "'How would you know this system is healthy?' and 'A user reports slowness; how do you find the cause?' are both observability questions, and staff candidates answer them before being asked.",
+    "senior": "Describes the three pillars, proposes Prometheus and Grafana for metrics, structured logs in a central store, and distributed tracing with OpenTelemetry.",
+    "staff": "Starts from SLOs and derives the golden signals per service, then alerts on error budget burn rate rather than static thresholds, with a small number of paging alerts and many ticket-level ones. Ensures trace context propagates across every boundary including queues and makes trace ids appear in logs so the three pillars link. Controls cost deliberately: tail-based sampling that keeps every slow or failed trace, cardinality limits on metric labels, log levels and retention tiers. Describes how an on-call engineer actually moves from a page to a cause in minutes: dashboard by SLO, exemplar trace, log search by trace id. Extends observability to deploys (every change annotated on graphs) and to business metrics (orders per minute as a leading indicator). Builds it into staging and CI so it is exercised before production.",
+    "probes": [
+      "Which three alerts would page a human for this system, and why not thirty?",
+      "A request crosses a queue. How does the trace survive the hop?",
+      "Your metrics bill doubled last month. What label did someone add?"
+    ]
+  },
+  "quiz": [
+    {
+      "q": "What are the four golden signals?",
+      "a": "Latency (how long requests take, as percentiles), traffic (requests per second), errors (fraction failing), and saturation (how full the service is: CPU, memory, queue depth, connection pool). They are the minimum dashboard for any service."
+    },
+    {
+      "q": "Why alert on symptoms rather than causes?",
+      "a": "CPU at 90 percent during a healthy batch job pages someone for nothing; CPU at 60 percent during a connection pool exhaustion pages no one during a real outage. Symptoms (SLO violations: latency, error rate) correlate with user harm. Causes are for dashboards during the investigation, not for pages."
+    },
+    {
+      "q": "What is high cardinality in metrics and why does it hurt?",
+      "a": "A label with many distinct values (user id, request id, URL with ids) creates a separate time series per value. Millions of series exhaust memory and storage in the metrics system and make queries slow. Put high-cardinality identifiers in traces and logs, not metric labels."
+    },
+    {
+      "q": "How does tail-based sampling differ from head-based, and why does it matter?",
+      "a": "Head-based sampling decides at the start of a request whether to keep its trace, so it randomly discards the slow and failed ones you most need. Tail-based sampling buffers traces and decides at the end, keeping every error and outlier while sampling the boring successes."
+    }
+  ],
   "children": []
 }
